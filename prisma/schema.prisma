@@ -1,0 +1,420 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConsoleType {
+  PS3
+  PS4
+  PS5
+}
+
+enum PlaystationStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  MISSING_PARTS
+  DEFECTIVE
+}
+
+enum CustomerRating {
+  TRUSTED
+  NORMAL
+  RISKY
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+  LOYALTY
+}
+
+enum PaymentMethod {
+  CASH
+  CLICK
+}
+
+enum ExtensionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  COURIER_ASSIGNED
+  ACCEPTED
+  REJECTED
+  ON_THE_WAY
+  ARRIVED
+  DELIVERED
+  RETURN_REQUESTED
+  RETURNED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+enum NotificationType {
+  ORDER_CREATED
+  ORDER_ACCEPTED
+  ORDER_REJECTED
+  COURIER_ON_WAY
+  ORDER_DELIVERED
+  RETURN_REMINDER
+  ORDER_RETURNED
+  ORDER_COMPLETED
+  ORDER_CANCELLED
+  COURIER_ASSIGNED
+  ORDER_ARRIVED
+  ADMIN_ORDER_ASSIGNED
+  PROMO
+  ADVERTISEMENT
+}
+
+model User {
+  id             Int      @id @default(autoincrement())
+  telegramId     BigInt   @unique
+  username       String?
+  fullName       String?
+  phone          String?
+  defaultAddress String?
+  latitude       Float?
+  longitude      Float?
+  isBlocked        Boolean         @default(false)
+  lastActivityAt   DateTime?
+  customerRating   CustomerRating  @default(NORMAL)
+  adminNotes       String?
+  createdAt        DateTime        @default(now())
+  orders           Order[]
+  reviews          Review[]
+
+  @@index([lastActivityAt])
+  @@map("users")
+}
+
+model Courier {
+  id           Int           @id @default(autoincrement())
+  telegramId   BigInt        @unique
+  username     String?
+  fullName     String?
+  phone        String?
+  region       String?
+  latitude     Float?
+  longitude    Float?
+  isActive     Boolean       @default(true)
+  rating       Decimal       @default(5) @db.Decimal(3, 2)
+  createdAt    DateTime      @default(now())
+  playstations Playstation[]
+  orders       Order[]
+
+  @@map("couriers")
+}
+
+model Playstation {
+  id           Int               @id @default(autoincrement())
+  courierId    Int
+  courier      Courier           @relation(fields: [courierId], references: [id])
+  type         ConsoleType
+  serialNumber String            @unique
+  status       PlaystationStatus @default(AVAILABLE)
+  accessories  Json?
+  createdAt    DateTime          @default(now())
+  orders       Order[]
+
+  @@map("playstations")
+}
+
+model InventoryUnit {
+  id            Int               @id @default(autoincrement())
+  unitCode      String            @unique
+  consoleType   ConsoleType
+  status        PlaystationStatus @default(AVAILABLE)
+  purchasedAt   DateTime?
+  purchasePrice Decimal?          @db.Decimal(10, 2)
+  lastServiceAt DateTime?
+  adminNote     String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  orders        Order[]
+  history       InventoryUnitHistory[]
+
+  @@index([consoleType, status])
+  @@map("inventory_units")
+}
+
+model InventoryUnitHistory {
+  id              Int                @id @default(autoincrement())
+  inventoryUnitId Int
+  inventoryUnit   InventoryUnit      @relation(fields: [inventoryUnitId], references: [id], onDelete: Cascade)
+  action          String
+  fromStatus      PlaystationStatus?
+  toStatus        PlaystationStatus?
+  orderId         Int?
+  note            String?
+  actorType       String?
+  actorId         Int?
+  createdAt       DateTime           @default(now())
+
+  @@index([inventoryUnitId, createdAt])
+  @@map("inventory_unit_history")
+}
+
+model DeliveryZone {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  fee       Decimal  @db.Decimal(10, 2)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("delivery_zones")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model AdminAuditLog {
+  id              Int      @id @default(autoincrement())
+  adminId         Int?
+  adminTelegramId BigInt?
+  module          String?
+  action          String
+  entityType      String?
+  entityId        Int?
+  beforeData      Json?
+  afterData       Json?
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([module])
+  @@map("admin_audit_logs")
+}
+
+model DatabaseBackup {
+  id               Int      @id @default(autoincrement())
+  filename         String
+  filePath         String
+  fileSize         BigInt?
+  createdByAdminId Int?
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("database_backups")
+}
+
+model RentalExtension {
+  id                Int             @id @default(autoincrement())
+  orderId           Int
+  order             Order           @relation(fields: [orderId], references: [id])
+  extraHours        Int
+  extraPrice        Decimal         @db.Decimal(10, 2)
+  status            ExtensionStatus @default(PENDING)
+  requestedAt       DateTime        @default(now())
+  resolvedAt        DateTime?
+  resolvedByAdminId Int?
+  previousEnd       DateTime
+  newEnd            DateTime?
+
+  @@index([orderId, status])
+  @@map("rental_extensions")
+}
+
+model ConsoleCatalog {
+  id           Int           @id @default(autoincrement())
+  code         String        @unique
+  displayName  String
+  isActive     Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  rentalPrices RentalPrice[]
+
+  @@map("console_catalog")
+}
+
+model RentalPrice {
+  id               Int            @id @default(autoincrement())
+  consoleCatalogId Int
+  consoleCatalog   ConsoleCatalog @relation(fields: [consoleCatalogId], references: [id], onDelete: Cascade)
+  hours            Int
+  price            Decimal        @db.Decimal(10, 2)
+  currency         String         @default("UZS")
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  orders           Order[]
+
+  @@unique([consoleCatalogId, hours])
+  @@map("rental_prices")
+}
+
+model Promocode {
+  id               Int          @id @default(autoincrement())
+  code             String       @unique
+  discountType     DiscountType @default(PERCENT)
+  discountPercent  Int          @default(0)
+  discountAmount   Decimal?     @db.Decimal(10, 2)
+  loyaltyMinOrders Int?
+  description      String?
+  usageLimit       Int
+  usedCount        Int          @default(0)
+  minOrderAmount   Decimal?     @db.Decimal(10, 2)
+  maxDiscountAmount Decimal?    @db.Decimal(10, 2)
+  perUserLimit     Int          @default(1)
+  expiresAt        DateTime
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  orders           Order[]
+
+  @@map("promocodes")
+}
+
+model Order {
+  id            Int          @id @default(autoincrement())
+  userId        Int
+  user          User         @relation(fields: [userId], references: [id])
+  courierId     Int?
+  courier       Courier?     @relation(fields: [courierId], references: [id])
+  playstationId Int?
+  playstation   Playstation? @relation(fields: [playstationId], references: [id])
+  rentalPriceId Int
+  rentalPrice   RentalPrice @relation(fields: [rentalPriceId], references: [id])
+  promocodeId   Int?
+  promocode     Promocode?   @relation(fields: [promocodeId], references: [id])
+
+  consoleType   ConsoleType
+  address       String
+  latitude      Float?
+  longitude     Float?
+  startDatetime DateTime
+  endDatetime   DateTime
+  totalPrice    Decimal      @db.Decimal(10, 2)
+  deliveryFee   Decimal      @default(0) @db.Decimal(10, 2)
+  depositAmount Decimal      @default(0) @db.Decimal(10, 2)
+  status        OrderStatus  @default(PENDING)
+  inventoryUnitId Int?
+  inventoryUnit InventoryUnit? @relation(fields: [inventoryUnitId], references: [id])
+  acceptedAt    DateTime?
+  assignedAt    DateTime?
+  deliveryStartedAt DateTime?
+  deliveryCompletedAt DateTime?
+  assignedByAdmin Boolean    @default(false)
+
+  deliveryZoneCode String?
+
+  statusLogs    OrderStatusLog[]
+  review        Review?
+  notifications Notification[]
+  payments      OrderPayment[]
+  extensions    RentalExtension[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, endDatetime])
+  @@map("orders")
+}
+
+model OrderStatusLog {
+  id        Int         @id @default(autoincrement())
+  orderId   Int
+  order     Order       @relation(fields: [orderId], references: [id])
+  status    OrderStatus
+  actorType String?
+  actorId   Int?
+  note      String?
+  changedAt DateTime    @default(now())
+
+  @@map("order_status_logs")
+}
+
+model Review {
+  id        Int      @id @default(autoincrement())
+  orderId   Int      @unique
+  order     Order    @relation(fields: [orderId], references: [id])
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@map("reviews")
+}
+
+model Notification {
+  id            Int              @id @default(autoincrement())
+  orderId       Int?
+  order         Order?           @relation(fields: [orderId], references: [id])
+  type          NotificationType
+  recipientType String
+  recipientId   Int
+  isSent        Boolean          @default(false)
+  sentAt        DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+model OrderPayment {
+  id        Int           @id @default(autoincrement())
+  orderId   Int
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod @default(CASH)
+  status    PaymentStatus @default(UNPAID)
+  paidAt    DateTime?
+  note      String?
+  createdAt DateTime      @default(now())
+
+  @@index([orderId])
+  @@index([status])
+  @@map("order_payments")
+}
+
+model Admin {
+  id         Int      @id @default(autoincrement())
+  telegramId BigInt   @unique
+  fullName   String?
+  role       String   @default("admin")
+  createdAt  DateTime @default(now())
+  campaigns  AdCampaign[]
+
+  @@map("admins")
+}
+
+model AdCampaign {
+  id             Int      @id @default(autoincrement())
+  adminId        Int
+  admin          Admin    @relation(fields: [adminId], references: [id])
+  message        String
+  mediaType      String   @default("text")
+  payload        Json?
+  recipientCount Int      @default(0)
+  successCount   Int      @default(0)
+  failCount      Int      @default(0)
+  sentAt         DateTime @default(now())
+
+  @@map("ad_campaigns")
+}

@@ -1,0 +1,16 @@
+SET search_path TO playstation_rental;
+
+ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS "minOrderAmount" DECIMAL(10,2);
+ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS "maxDiscountAmount" DECIMAL(10,2);
+ALTER TABLE promocodes ADD COLUMN IF NOT EXISTS "perUserLimit" INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS "mediaType" VARCHAR(32) NOT NULL DEFAULT 'text';
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS payload JSONB;
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS "successCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS "failCount" INTEGER NOT NULL DEFAULT 0;
+
+UPDATE rental_prices SET "isActive" = false WHERE hours NOT IN (24, 48, 72);
+
+INSERT INTO system_settings (key, value, "updatedAt")
+VALUES ('REALTIME_DASHBOARD_DEFAULT', 'true', CURRENT_TIMESTAMP)
+ON CONFLICT (key) DO NOTHING;
