@@ -21,6 +21,32 @@ enum PlaystationStatus {
   DEFECTIVE
 }
 
+enum InventoryItemType {
+  CONSOLE
+  JOYSTICK
+  HDMI
+  POWER
+}
+
+enum InventoryItemStatus {
+  AVAILABLE
+  RESERVED
+  RENTED
+  MAINTENANCE
+}
+
+enum ConditionGrade {
+  IDEAL
+  GOOD
+  MINOR_ISSUE
+  SERIOUS_ISSUE
+}
+
+enum OrderPhotoType {
+  HANDOVER
+  RETURN
+}
+
 enum CustomerRating {
   TRUSTED
   NORMAL
@@ -36,6 +62,13 @@ enum DiscountType {
 enum PaymentMethod {
   CASH
   CLICK
+  CARD
+}
+
+enum CollateralType {
+  ID_CARD
+  PASSPORT
+  NONE
 }
 
 enum ExtensionStatus {
@@ -52,6 +85,7 @@ enum OrderStatus {
   ON_THE_WAY
   ARRIVED
   DELIVERED
+  ACTIVE
   RETURN_REQUESTED
   RETURNED
   COMPLETED
@@ -94,6 +128,8 @@ model User {
   defaultAddress String?
   latitude       Float?
   longitude      Float?
+  /// Foydalanuvchi interfeys tili: UZ | RU. null = hali tanlanmagan
+  language         String?
   isBlocked        Boolean         @default(false)
   lastActivityAt   DateTime?
   customerRating   CustomerRating  @default(NORMAL)
@@ -101,6 +137,7 @@ model User {
   createdAt        DateTime        @default(now())
   orders           Order[]
   reviews          Review[]
+  supportThread    SupportThread?
 
   @@index([lastActivityAt])
   @@map("users")
@@ -120,6 +157,7 @@ model Courier {
   createdAt    DateTime      @default(now())
   playstations Playstation[]
   orders       Order[]
+  deliveredOrders Order[]    @relation("OrderDeliveredBy")
 
   @@map("couriers")
 }
@@ -323,18 +361,133 @@ model Order {
 
   deliveryZoneCode String?
 
+  /// Topshirish paytida olingan to'lov
+  paymentReceived     Boolean        @default(false)
+  paymentMethod       PaymentMethod?
+  paymentReceivedAt   DateTime?
+  finalPaidAmount     Decimal?       @db.Decimal(10, 2)
+
+  /// Garov hujjati
+  collateralType      CollateralType?
+  collateralTaken     Boolean        @default(false)
+  collateralReturned  Boolean        @default(false)
+
+  deliveredByCourierId Int?
+  deliveredByCourier   Courier?      @relation("OrderDeliveredBy", fields: [deliveredByCourierId], references: [id])
+
+  /// Professional inventar topshirish
+  consoleItemId   Int?
+  consoleItem     InventoryItem? @relation("OrderConsoleItem", fields: [consoleItemId], references: [id])
+  hdmiItemId      Int?
+  hdmiItem        InventoryItem? @relation("OrderHdmiItem", fields: [hdmiItemId], references: [id])
+  powerItemId     Int?
+  powerItem       InventoryItem? @relation("OrderPowerItem", fields: [powerItemId], references: [id])
+
+  returnCondition ConditionGrade?
+  returnNote      String?
+  returnedAt      DateTime?
+
   statusLogs    OrderStatusLog[]
   review        Review?
   notifications Notification[]
   payments      OrderPayment[]
   extensions    RentalExtension[]
+  orderItems    OrderInventoryItem[]
+  contract      RentalContract?
+  photos        OrderPhoto[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
   @@index([status, endDatetime])
+  @@index([paymentReceived])
   @@map("orders")
+}
+
+model InventoryItem {
+  id              Int                 @id @default(autoincrement())
+  itemType        InventoryItemType
+  consoleType     ConsoleType?
+  inventoryNumber String              @unique
+  serialNumber    String              @unique
+  condition       ConditionGrade      @default(GOOD)
+  status          InventoryItemStatus @default(AVAILABLE)
+  purchasedAt     DateTime?
+  note            String?
+  reservedOrderId Int?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  history         InventoryItemHistory[]
+  orderLinks      OrderInventoryItem[]
+  ordersAsConsole Order[] @relation("OrderConsoleItem")
+  ordersAsHdmi    Order[] @relation("OrderHdmiItem")
+  ordersAsPower   Order[] @relation("OrderPowerItem")
+
+  @@index([itemType, status])
+  @@index([consoleType, status])
+  @@map("inventory_items")
+}
+
+model InventoryItemHistory {
+  id              Int                  @id @default(autoincrement())
+  inventoryItemId Int
+  inventoryItem   InventoryItem        @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  action          String
+  fromStatus      InventoryItemStatus?
+  toStatus        InventoryItemStatus?
+  orderId         Int?
+  note            String?
+  actorType       String?
+  actorId         Int?
+  createdAt       DateTime             @default(now())
+
+  @@index([inventoryItemId])
+  @@map("inventory_item_history")
+}
+
+model OrderInventoryItem {
+  id              Int             @id @default(autoincrement())
+  orderId         Int
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryItemId Int
+  inventoryItem   InventoryItem   @relation(fields: [inventoryItemId], references: [id])
+  role            InventoryItemType
+  returnedAt      DateTime?
+  returnCondition ConditionGrade?
+  returnNote      String?
+  createdAt       DateTime        @default(now())
+
+  @@unique([orderId, inventoryItemId])
+  @@index([orderId])
+  @@map("order_inventory_items")
+}
+
+model RentalContract {
+  id             Int      @id @default(autoincrement())
+  orderId        Int      @unique
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  contractNumber String   @unique
+  pdfPath        String?
+  telegramFileId String?
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  @@map("rental_contracts")
+}
+
+model OrderPhoto {
+  id             Int           @id @default(autoincrement())
+  orderId        Int
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  photoType      OrderPhotoType
+  filePath       String?
+  telegramFileId String
+  createdAt      DateTime      @default(now())
+
+  @@index([orderId, photoType])
+  @@map("order_photos")
 }
 
 model OrderStatusLog {
@@ -400,6 +553,7 @@ model Admin {
   role       String   @default("admin")
   createdAt  DateTime @default(now())
   campaigns  AdCampaign[]
+  supportMessages SupportMessage[]
 
   @@map("admins")
 }
@@ -417,4 +571,51 @@ model AdCampaign {
   sentAt         DateTime @default(now())
 
   @@map("ad_campaigns")
+}
+
+enum SupportSenderType {
+  ADMIN
+  USER
+}
+
+enum SupportThreadStatus {
+  OPEN
+  CLOSED
+}
+
+/// Admin ↔ Mijoz qo'llab-quvvatlash chat (har bir mijoz uchun bitta thread)
+model SupportThread {
+  id            Int                 @id @default(autoincrement())
+  userId        Int                 @unique
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        SupportThreadStatus @default(OPEN)
+  lastMessageAt DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  messages      SupportMessage[]
+
+  @@index([status])
+  @@index([lastMessageAt])
+  @@map("support_threads")
+}
+
+model SupportMessage {
+  id                Int               @id @default(autoincrement())
+  threadId          Int
+  thread            SupportThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderType        SupportSenderType
+  senderUserId      Int?
+  senderAdminId     Int?
+  senderAdmin       Admin?            @relation(fields: [senderAdminId], references: [id])
+  messageType       String
+  text              String?
+  caption           String?
+  fileId            String?
+  payload           Json?
+  telegramMessageId BigInt?
+  createdAt         DateTime          @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([senderType])
+  @@map("support_messages")
 }

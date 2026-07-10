@@ -1,5 +1,4 @@
 const orderRepository = require("../repositories/order.repository");
-const orderAssignmentService = require("./orderAssignment.service");
 const playstationService = require("./playstation.service");
 const inventoryService = require("./inventory.service");
 const orderNotificationService = require("./orderNotification.service");
@@ -13,6 +12,7 @@ const ACTIVE_COURIER_STATUSES = [
   "ON_THE_WAY",
   "ARRIVED",
   "DELIVERED",
+  "ACTIVE",
   "RETURN_REQUESTED",
 ];
 
@@ -86,17 +86,82 @@ async function acceptOrderByCourier(orderId, courierId) {
   return updated;
 }
 
+const TERMINAL_STATUSES = new Set(["REJECTED", "COMPLETED", "CANCELLED", "EXPIRED"]);
+
+function assertCanReject(order) {
+  if (!order) throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
+  if (order.status === "REJECTED") {
+    throw new OrderAssignmentError("ALREADY_REJECTED", "Bu buyurtma allaqachon rad etilgan");
+  }
+  if (order.status === "COMPLETED") {
+    throw new OrderAssignmentError("ALREADY_COMPLETED", "Yakunlangan buyurtmani rad etib bo'lmaydi");
+  }
+  if (TERMINAL_STATUSES.has(order.status) || ["DELIVERED", "ACTIVE", "RETURNED", "RETURN_REQUESTED"].includes(order.status)) {
+    throw new OrderAssignmentError(
+      "NOT_AVAILABLE",
+      `Buyurtma holati (${order.status}) — rad etib bo'lmaydi`
+    );
+  }
+  if (!["PENDING", "COURIER_ASSIGNED", "ACCEPTED"].includes(order.status)) {
+    throw new OrderAssignmentError("NOT_AVAILABLE", "Bu holatda rad etib bo'lmaydi");
+  }
+}
+
 async function rejectOrderByCourier(orderId, courierId) {
   const order = await orderRepository.findById(orderId);
-  if (!order || order.status !== "PENDING") {
-    throw new OrderAssignmentError("NOT_AVAILABLE", "Rad etib bo'lmaydi");
+  assertCanReject(order);
+
+  if (order.courierId && order.courierId !== courierId) {
+    throw new OrderAssignmentError("FORBIDDEN", "Bu buyurtma boshqa kuryerga biriktirilgan");
   }
-  await orderRepository.createStatusLog(orderId, "REJECTED", {
+
+  const courier = await courierRepository.findById(courierId);
+
+  if (order.playstationId) {
+    await playstationService.setStatus(order.playstationId, "AVAILABLE");
+  }
+  await inventoryService.releaseUnit(orderId);
+
+  const updated = await updateOrderStatus(orderId, "REJECTED", {
     actorType: "courier",
     actorId: courierId,
-    note: "Kuryer rad etdi (boshqa kuryerlar ko'ra oladi)",
+    note: "Kuryer buyurtmani rad etdi",
   });
-  return order;
+
+  await orderNotificationService.notifyOrderRejected(updated, {
+    by: "courier",
+    courierName: courier?.fullName || "Kuryer",
+  });
+
+  return updated;
+}
+
+async function rejectOrderByAdmin(orderId, adminTelegramId) {
+  const order = await orderRepository.findById(orderId);
+  assertCanReject(order);
+
+  if (order.playstationId) {
+    await playstationService.setStatus(order.playstationId, "AVAILABLE");
+  }
+  await inventoryService.releaseUnit(orderId);
+
+  const updated = await updateOrderStatus(orderId, "REJECTED", {
+    actorType: "admin",
+    actorId: adminTelegramId,
+    note: "Admin buyurtmani rad etdi",
+  });
+
+  await orderNotificationService.notifyOrderRejected(updated, { by: "admin" });
+
+  await auditLogService.log({
+    adminTelegramId,
+    action: "ORDER_REJECTED",
+    entityType: "Order",
+    entityId: orderId,
+    afterData: { message: `Admin buyurtmani #${orderId} rad etdi` },
+  });
+
+  return updated;
 }
 
 async function assignOrderByAdmin(orderId, courierId) {
@@ -166,8 +231,10 @@ async function cancelOrderByAdmin(orderId, adminTelegramId) {
     note: "Admin buyurtmani bekor qildi",
   });
 
+  const { t, resolveLang } = require("../i18n");
+  const userLang = resolveLang(updated.user?.language);
   await orderNotificationService.notifyStatusChange(updated, "Bekor qilindi", {
-    customerText: `❌ Buyurtmangiz (#${orderId}) bekor qilindi.`,
+    customerText: t("notify.cancelled", userLang, { id: orderId }),
     adminText: `❌ Buyurtma #${orderId} admin tomonidan bekor qilindi.`,
   });
 
@@ -197,7 +264,12 @@ async function updateCourierOrderStatus(orderId, courierId, status) {
 
   const timestamps = {};
   if (status === "ON_THE_WAY") timestamps.deliveryStartedAt = new Date();
-  if (status === "DELIVERED" || status === "COMPLETED") timestamps.deliveryCompletedAt = new Date();
+  // deliveryCompletedAt faqat to'liq handover (completeHandover) da yoziladi
+  if (status === "COMPLETED") timestamps.deliveryCompletedAt = new Date();
+  // Eski yo'l: to'g'ridan-to'g'ri DELIVERED (handover tashqarisida) — timestamp saqlansin
+  if (status === "DELIVERED" && !order.paymentReceived) {
+    timestamps.deliveryCompletedAt = new Date();
+  }
 
   const updated = await updateOrderStatus(orderId, status, {
     actorType: "courier",
@@ -219,8 +291,21 @@ async function updateCourierOrderStatus(orderId, courierId, status) {
     CANCELLED: "Bekor qilindi",
   };
 
+  const { t, resolveLang } = require("../i18n");
+  const userLang = resolveLang(updated.user?.language);
+  const customerKey = {
+    ON_THE_WAY: "notify.onTheWay",
+    ARRIVED: "notify.arrived",
+    DELIVERED: "notify.delivered",
+    RETURN_REQUESTED: "notify.returnRequested",
+    CANCELLED: "notify.cancelled",
+  }[status];
+  const customerText = customerKey
+    ? t(customerKey, userLang, { id: orderId })
+    : t("notify.statusDefault", userLang, { id: orderId, status: labels[status] || status });
+
   await orderNotificationService.notifyStatusChange(updated, labels[status] || status, {
-    customerText: `📦 Buyurtma #${orderId}: ${labels[status] || status}`,
+    customerText,
     adminText: `📦 #${orderId} — ${labels[status] || status} (kuryer: ${order.courier?.fullName || "—"})`,
   });
 
@@ -264,6 +349,7 @@ module.exports = {
   broadcastNewOrder,
   acceptOrderByCourier,
   rejectOrderByCourier,
+  rejectOrderByAdmin,
   assignOrderByAdmin,
   confirmOrderByAdmin,
   cancelOrderByAdmin,

@@ -39,7 +39,7 @@ async function findAvailable({ consoleType, startDatetime, endDatetime }) {
   const busyOrders = await prisma.order.findMany({
     where: {
       status: {
-        in: ["PENDING", "COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED", "DELIVERED", "RETURN_REQUESTED"],
+        in: ["PENDING", "COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"],
       },
       AND: [{ startDatetime: { lte: endDatetime } }, { endDatetime: { gte: startDatetime } }],
     },

@@ -10,6 +10,7 @@ const PaymentStatus = {
 const PaymentMethod = {
   CASH: "CASH",
   CLICK: "CLICK",
+  CARD: "CARD",
 };
 
 const LABELS_UZ = {
@@ -24,6 +25,7 @@ const LABELS_UZ = {
 const METHOD_LABELS_UZ = {
   CASH: "Naqd",
   CLICK: "Click",
+  CARD: "Karta",
 };
 
 function labelStatus(s) {

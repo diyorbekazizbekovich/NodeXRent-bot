@@ -14,17 +14,21 @@ function normalizeDuration(duration) {
 
 const ALLOWED_RENTAL_HOURS = [24, 48, 72];
 
-function formatDurationLabel(hours) {
+function formatDurationLabel(hours, lang) {
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(lang);
   const h = Number(hours);
-  if (h === 24) return "📅 1 kun";
-  if (h === 48) return "📅 2 kun";
-  if (h === 72) return "📅 3 kun";
-  if (h % 24 === 0) return `📅 ${h / 24} kun`;
-  return `${h} soat`;
+  if (h === 24) return t("order.duration1", L);
+  if (h === 48) return t("order.duration2", L);
+  if (h === 72) return t("order.duration3", L);
+  if (h % 24 === 0) return t("order.durationDays", L, { n: h / 24 });
+  return t("order.durationHours", L, { n: h });
 }
 
-function formatMoney(amount, currency = "UZS") {
-  const suffix = currency === "UZS" ? " so'm" : ` ${currency}`;
+function formatMoney(amount, currency = "UZS", lang) {
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(lang);
+  const suffix = currency === "UZS" ? t("currency.uzs", L) : ` ${currency}`;
   return `${Number(amount).toLocaleString()}${suffix}`;
 }
 
@@ -146,6 +150,69 @@ async function updateConsoleType(id, data) {
   return pricingRepository.updateConsole(id, data);
 }
 
+async function toggleConsoleType(id) {
+  const catalog = await pricingRepository.findConsoleById(id);
+  if (!catalog) {
+    throw new PricingError("CONSOLE_NOT_FOUND", "Konsol topilmadi");
+  }
+  return pricingRepository.updateConsole(id, { isActive: !catalog.isActive });
+}
+
+async function renameConsoleType(id, displayName) {
+  const name = String(displayName || "").trim();
+  if (!name) {
+    throw new PricingError("INVALID_CONSOLE_TYPE", "Konsol nomi bo'sh bo'lishi mumkin emas");
+  }
+  const catalog = await pricingRepository.findConsoleById(id);
+  if (!catalog) {
+    throw new PricingError("CONSOLE_NOT_FOUND", "Konsol topilmadi");
+  }
+  return pricingRepository.updateConsole(id, { displayName: name });
+}
+
+async function deleteConsoleType(id) {
+  const catalog = await pricingRepository.findConsoleById(id);
+  if (!catalog) {
+    throw new PricingError("CONSOLE_NOT_FOUND", "Konsol topilmadi");
+  }
+
+  const activeOrders = await pricingRepository.countActiveOrdersByConsoleCode(catalog.code);
+  if (activeOrders > 0) {
+    throw new PricingError(
+      "CONSOLE_IN_USE",
+      `❌ ${catalog.displayName} (${catalog.code}) o'chirib bo'lmaydi.\n\nSabab: ${activeOrders} ta faol buyurtmada ishlatilmoqda.\nAvval buyurtmalarni yakunlang yoki konsolni nofaol qiling.`
+    );
+  }
+
+  const linkedOrders = await pricingRepository.countRentalPricesReferencingConsole(catalog.id);
+  if (linkedOrders > 0) {
+    throw new PricingError(
+      "CONSOLE_HAS_HISTORY",
+      `❌ ${catalog.displayName} (${catalog.code}) o'chirib bo'lmaydi.\n\nSabab: tarixda ${linkedOrders} ta buyurtma shu konsol narxiga bog'langan.\nO'rniga «Nofaol qilish» ni bosing.`
+    );
+  }
+
+  try {
+    return await pricingRepository.deleteConsole(id);
+  } catch (err) {
+    if (err.code === "P2003") {
+      throw new PricingError(
+        "CONSOLE_FK",
+        `❌ ${catalog.displayName} o'chirib bo'lmadi — bog'liq ma'lumotlar mavjud.\nO'rniga nofaol qiling.`
+      );
+    }
+    throw err;
+  }
+}
+
+async function getConsoleById(id) {
+  const catalog = await pricingRepository.findConsoleById(id);
+  if (!catalog) {
+    throw new PricingError("CONSOLE_NOT_FOUND", "Konsol topilmadi");
+  }
+  return catalog;
+}
+
 async function createRentalPriceOption({ consoleType, duration, price, currency = "UZS" }) {
   const code = normalizeConsoleCode(consoleType);
   const hours = normalizeDuration(duration);
@@ -190,9 +257,9 @@ function calculateTotalPrice(basePrice, promo) {
   return promoService.calculateDiscount(basePrice, promo).finalPrice;
 }
 
-async function validatePromocode(code, userId, orderSubtotal = 0) {
+async function validatePromocode(code, userId, orderSubtotal = 0, lang) {
   const promoService = require("./promo.service");
-  return promoService.validatePromocode(code, userId, orderSubtotal);
+  return promoService.validatePromocode(code, userId, orderSubtotal, lang);
 }
 
 async function incrementPromocodeUsage(promocodeId) {
@@ -214,6 +281,10 @@ module.exports = {
   listAllRentalPrices,
   createConsoleType,
   updateConsoleType,
+  toggleConsoleType,
+  renameConsoleType,
+  deleteConsoleType,
+  getConsoleById,
   createRentalPriceOption,
   updateRentalPriceOption,
   deleteRentalPriceOption,

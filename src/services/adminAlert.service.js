@@ -11,7 +11,7 @@ async function getAdminAlerts() {
     prisma.order.count({ where: { status: "PENDING", courierId: null } }),
     prisma.order.count({
       where: {
-        status: { in: ["DELIVERED", "RETURN_REQUESTED"] },
+        status: { in: ["DELIVERED", "ACTIVE", "RETURN_REQUESTED"] },
         endDatetime: { gte: todayStart, lte: todayEnd },
       },
     }),

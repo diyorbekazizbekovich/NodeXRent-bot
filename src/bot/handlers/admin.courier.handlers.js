@@ -7,6 +7,7 @@ const {
   courierActionsKeyboard,
   courierEditFieldsKeyboard,
 } = require("../keyboards/admin.courier.keyboards");
+const { addCallbackHandler } = require("../events/callbackRouter");
 
 function formatStats(stats) {
   return (
@@ -26,16 +27,16 @@ async function sendCourierCard(bot, chatId, courier) {
 }
 
 function registerAdminCourierHandlers(bot, isAdmin) {
-  bot.on("callback_query", async (query) => {
+  addCallbackHandler("admin-courier", async (bot, query) => {
     const data = query.data;
-    if (!data.startsWith("admin:courier:")) return;
+    if (!data?.startsWith("admin:courier:")) return false;
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
 
     if (!(await isAdmin(telegramId))) {
       await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
-      return;
+      return true;
     }
 
     try {
@@ -111,6 +112,7 @@ function registerAdminCourierHandlers(bot, isAdmin) {
       logger.error("Admin courier handler xatoligi", { context: "AdminCourier", error: err.message });
       await safeAnswerCallbackQuery(bot, query.id, { text: message });
     }
+    return true;
   });
 }
 

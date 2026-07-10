@@ -18,7 +18,8 @@ function registerDashboardRoutes(router) {
 
   router.get("/analytics", requireRole("admin"), async (req, res) => {
     try {
-      const report = await analyticsService.getAnalyticsReport();
+      const period = req.query.period || "today";
+      const report = await analyticsService.getAnalyticsReport(period);
       res.json(report);
     } catch (err) {
       res.status(500).json({ error: err.message });

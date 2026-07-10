@@ -4,13 +4,50 @@ const pricingService = require("../../services/pricing.service");
 const userKeyboards = require("../keyboards/user.keyboards");
 const orderScene = require("../scenes/orderScene");
 const sessionStore = require("../sessionStore");
-const { formatDatetime } = require("../../utils/dateHelper");
 const logger = require("../../utils/logger");
 const rentalExtensionService = require("../../services/rentalExtension.service");
-const { label: orderLabel } = require("../../constants/orderStatus");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
+const userOrderHistoryService = require("../../services/userOrderHistory.service");
+const { ACTIVE_RENTAL_STATUSES } = require("../../constants/orderStatus");
+const { t, resolveLang, languageKeyboard, matchMenuAction, normalizeLang } = require("../../i18n");
+const { formatDatetime } = require("../../utils/dateHelper");
+const {
+  registerUserSupportHandlers,
+  handleUserSupportMessage,
+} = require("./user.support.handlers");
+const { STEPS: SUPPORT_STEPS } = require("../../constants/supportChat");
+const { wasMessageHandled } = require("../helpers/handledMessage");
+const { addCallbackHandler } = require("../events/callbackRouter");
+
+const USER_CALLBACK_PREFIXES = ["lang:", "console:", "rental:", "date:", "time:", "promo:", "extend:", "order:", "rate:"];
+
+function isUserCallback(data) {
+  return USER_CALLBACK_PREFIXES.some((p) => data?.startsWith(p));
+}
+
+async function continueAfterLanguage(bot, chatId, user, fullName) {
+  const L = resolveLang(user.language);
+
+  if (!user.phone) {
+    await bot.sendMessage(
+      chatId,
+      t("welcome.hello", L, { name: fullName || user.fullName || "" }),
+      userKeyboards.contactRequestKeyboard(L)
+    );
+    return;
+  }
+
+  if (!user.defaultAddress && !(user.latitude && user.longitude)) {
+    await bot.sendMessage(chatId, t("welcome.askLocation", L), userKeyboards.locationRequestKeyboard(L));
+    return;
+  }
+
+  await bot.sendMessage(chatId, t("welcome.mainMenu", L), userKeyboards.mainMenuKeyboard(L));
+}
 
 function register(bot) {
+  registerUserSupportHandlers(bot);
+
   // ---------- /start ----------
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
@@ -19,146 +56,192 @@ function register(bot) {
 
     const user = await userService.findOrCreateUser(telegramId, fullName, msg.from.username);
 
-    if (!user.phone) {
-      await bot.sendMessage(
-        chatId,
-        `Assalomu alaykum, ${fullName}! 👋\n\nPlayStation ijara botiga xush kelibsiz.\nDavom etish uchun telefon raqamingizni yuboring:`,
-        userKeyboards.contactRequestKeyboard()
-      );
+    if (!user.language) {
+      await bot.sendMessage(chatId, t("lang.choose", "UZ"), languageKeyboard());
       return;
     }
 
-    if (!user.defaultAddress && !(user.latitude && user.longitude)) {
-      await bot.sendMessage(
-        chatId,
-        "📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
-        userKeyboards.locationRequestKeyboard()
-      );
-      return;
-    }
-
-    await bot.sendMessage(chatId, "🏠 Asosiy menyu:", userKeyboards.mainMenuKeyboard());
+    await continueAfterLanguage(bot, chatId, user, fullName);
   });
 
   // ---------- Telefon raqam qabul qilish (contact) ----------
   bot.on("contact", async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
-    if (msg.contact.user_id && msg.contact.user_id !== telegramId) return; // faqat o'zining raqami
+    const session = sessionStore.getSession(chatId);
+    if (session.step === SUPPORT_STEPS.USER_REPLY) {
+      await handleUserSupportMessage(bot, msg);
+      return;
+    }
+    if (msg.contact.user_id && msg.contact.user_id !== telegramId) return;
 
-    await userService.updatePhone(telegramId, msg.contact.phone_number);
-    await bot.sendMessage(
-      chatId,
-      "✅ Telefon raqamingiz saqlandi.\n\n📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
-      userKeyboards.locationRequestKeyboard()
-    );
+    const user = await userService.updatePhone(telegramId, msg.contact.phone_number);
+    const L = resolveLang(user.language);
+    await bot.sendMessage(chatId, t("welcome.phoneSaved", L), userKeyboards.locationRequestKeyboard(L));
   });
 
   // ---------- Lokatsiya qabul qilish ----------
   bot.on("location", async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
+    const session = sessionStore.getSession(chatId);
+    if (session.step === SUPPORT_STEPS.USER_REPLY) {
+      await handleUserSupportMessage(bot, msg);
+      return;
+    }
     const { latitude, longitude } = msg.location;
 
-    await userService.updateLocation(telegramId, {
+    const user = await userService.updateLocation(telegramId, {
       latitude,
       longitude,
       address: `Lokatsiya: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
     });
-    await bot.sendMessage(chatId, "✅ Manzilingiz saqlandi.\n\n🏠 Asosiy menyu:", userKeyboards.mainMenuKeyboard());
+    const L = resolveLang(user.language);
+    await bot.sendMessage(chatId, t("welcome.locationSaved", L), userKeyboards.mainMenuKeyboard(L));
   });
 
-  // ---------- Matnli xabarlar (menyu tugmalari + scene ichidagi matn kiritish) ----------
+  // ---------- Support chat (matn + media) ----------
   bot.on("message", async (msg) => {
-    if (!msg.text || msg.text.startsWith("/")) return;
     if (msg.contact || msg.location) return;
+    if (await handleUserSupportMessage(bot, msg)) return;
+  });
+
+  // ---------- Matnli xabarlar ----------
+  bot.on("message", async (msg) => {
+    if (!msg.text) return;
+    if (msg.contact || msg.location) return;
+    if (wasMessageHandled(msg)) return;
 
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const text = msg.text.trim();
     const session = sessionStore.getSession(chatId);
 
-    // Agar foydalanuvchi hozir biror scene bosqichida bo'lsa (masalan manzil yozmoqda yoki promo kiritmoqda)
-    if (session.step === orderScene.STEPS.DATE_MANUAL) {
-      return orderScene.handleManualDateText(bot, chatId, text);
-    }
+    if (session.step === SUPPORT_STEPS.USER_REPLY) return;
+
     if (session.step === orderScene.STEPS.PROMO_INPUT) {
-      const promoUser = await userService.getUserByTelegramId(telegramId);
-      if (text === "/skip") {
-        return orderScene.handlePromoChoice(bot, chatId, "skip");
+      if (/^\/skip\b/i.test(text) || text.toLowerCase() === "skip") {
+        return orderScene.handlePromoSkip(bot, chatId);
       }
+      if (text.startsWith("/")) return;
+      const promoUser = await userService.getUserByTelegramId(telegramId);
       return orderScene.handlePromoText(bot, chatId, text, promoUser?.id);
     }
 
-    const user = await userService.getUserByTelegramId(telegramId);
+    if (text.startsWith("/")) return;
 
-    // Ro'yxatdan o'tmagan bo'lsa manzil sifatida qabul qilish
+    if (session.step === orderScene.STEPS.DATE_MANUAL) {
+      return orderScene.handleManualDateText(bot, chatId, text);
+    }
+
+    const user = await userService.getUserByTelegramId(telegramId);
+    const L = resolveLang(user?.language);
+
     if (user && !user.defaultAddress && !(user.latitude && user.longitude) && user.phone) {
       await userService.updateLocation(telegramId, { address: text, latitude: null, longitude: null });
-      await bot.sendMessage(chatId, "✅ Manzilingiz saqlandi.\n\n🏠 Asosiy menyu:", userKeyboards.mainMenuKeyboard());
+      await bot.sendMessage(chatId, t("welcome.locationSaved", L), userKeyboards.mainMenuKeyboard(L));
       return;
     }
 
-    switch (text) {
-      case "🎮 Buyurtma berish": {
+    const action = matchMenuAction(text);
+    if (!action) return;
+
+    switch (action) {
+      case "order": {
         if (!user || !user.phone || !(user.defaultAddress || (user.latitude && user.longitude))) {
-          await bot.sendMessage(chatId, "Iltimos avval /start orqali ro'yxatdan o'ting.");
+          await bot.sendMessage(chatId, t("welcome.needRegister", L));
           return;
         }
         return orderScene.start(bot, chatId);
       }
-      case "⏳ Ijara uzaytirish": {
+      case "extend": {
         const orders = await orderService.listUserOrders(user.id, { take: 20 });
-        const active = orders.filter((o) => ["DELIVERED", "RETURN_REQUESTED"].includes(o.status));
+        const active = orders.filter((o) => ACTIVE_RENTAL_STATUSES.includes(o.status));
         if (!active.length) {
-          await bot.sendMessage(chatId, "Faol ijaralar topilmadi.");
+          await bot.sendMessage(chatId, t("extend.none", L));
           return;
         }
         const rows = active.map((o) => [
-          { text: `#${o.id} ${o.consoleType}`, callback_data: `extend:pick:${o.id}` },
+          {
+            text: t("extend.pickItem", L, {
+              id: o.id,
+              console: o.consoleType,
+              end: formatDatetime(o.endDatetime),
+            }),
+            callback_data: `extend:pick:${o.id}`,
+          },
         ]);
-        await bot.sendMessage(chatId, "Qaysi buyurtmani uzaytirmoqchisiz?", {
+        await bot.sendMessage(chatId, t("extend.pick", L), {
           reply_markup: { inline_keyboard: rows },
         });
         return;
       }
-      case "📋 Buyurtmalarim": {
-        const orders = await orderService.listUserOrders(user.id);
+      case "myOrders": {
+        const orders = await orderService.listUserOrders(user.id, { take: 15 });
         if (orders.length === 0) {
-          await bot.sendMessage(chatId, "Sizda hali buyurtmalar yo'q.");
+          await bot.sendMessage(chatId, t("myOrders.empty", L));
           return;
         }
-        const lines = orders.map((o) => {
-          const courierInfo = o.courier ? `\n   🚚 ${o.courier.fullName || "—"} | ${o.courier.phone || "—"}` : "";
-          return `#${o.id} — ${o.consoleType}, ${pricingService.formatDurationLabel(o.rentalPrice.hours)}, ${formatDatetime(o.startDatetime)} — <b>${orderLabel(o.status)}</b>${courierInfo}`;
-        });
-        await bot.sendMessage(chatId, lines.join("\n"), { parse_mode: "HTML" });
+        const body = userOrderHistoryService.formatUserOrdersList(orders, L);
+        if (body.length <= 4000) {
+          await bot.sendMessage(chatId, body, { parse_mode: "HTML" });
+        } else {
+          for (const order of orders.slice(0, 8)) {
+            await bot.sendMessage(chatId, userOrderHistoryService.formatUserOrderCard(order, L), {
+              parse_mode: "HTML",
+            });
+          }
+        }
         return;
       }
-      case "📍 Manzilni o'zgartirish": {
-        await bot.sendMessage(chatId, "📍 Yangi manzilingizni yozing yoki lokatsiya yuboring:", userKeyboards.locationRequestKeyboard());
+      case "changeAddress": {
+        await bot.sendMessage(chatId, t("changeAddress.prompt", L), userKeyboards.locationRequestKeyboard(L));
         return;
       }
-      case "ℹ️ Yordam": {
-        await bot.sendMessage(
-          chatId,
-          "📞 *Qo'llab-quvvatlash*\n\n+998 50 024 7999",
-          { parse_mode: "Markdown" }
-        );
+      case "help": {
+        await bot.sendMessage(chatId, t("help.text", L), { parse_mode: "Markdown" });
+        return;
+      }
+      case "language": {
+        await bot.sendMessage(chatId, t("lang.choose", L), languageKeyboard());
         return;
       }
       default:
-        return; // boshqa matnlarni e'tiborsiz qoldiramiz
+        return;
     }
   });
 
-  // ---------- Callback query'lar (inline tugmalar) ----------
-  bot.on("callback_query", async (query) => {
+  // ---------- Callback query'lar ----------
+  addCallbackHandler("user", async (bot, query) => {
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
     const data = query.data;
 
+    if (!isUserCallback(data)) return false;
+
     try {
+      if (data.startsWith("lang:")) {
+        const lang = normalizeLang(data.split(":")[1]);
+        if (!lang) {
+          await safeAnswerCallbackQuery(bot, query.id);
+          return true;
+        }
+        const user = await userService.updateLanguage(telegramId, lang);
+        const L = resolveLang(lang);
+
+        try {
+          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+          });
+        } catch (_) {}
+
+        await safeAnswerCallbackQuery(bot, query.id, { text: t("lang.changed", L) });
+        const fullName = [query.from.first_name, query.from.last_name].filter(Boolean).join(" ");
+        await continueAfterLanguage(bot, chatId, user, fullName);
+        return true;
+      }
+
       if (data.startsWith("console:")) {
         await orderScene.handleConsoleSelect(bot, chatId, data.split(":")[1]);
       } else if (data.startsWith("rental:")) {
@@ -172,31 +255,87 @@ function register(bot) {
         await orderScene.handlePromoChoice(bot, chatId, data.split(":")[1]);
       } else if (data.startsWith("extend:pick:")) {
         const orderId = Number(data.split(":")[2]);
-        await bot.sendMessage(chatId, "Qancha uzaytirmoqchisiz?", {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "1 kun", callback_data: `extend:req:${orderId}:24` },
-                { text: "2 kun", callback_data: `extend:req:${orderId}:48` },
+        const user = await userService.getUserByTelegramId(telegramId);
+        const L = resolveLang(user?.language);
+        const order = await orderService.getOrderById(orderId);
+        if (!order || order.userId !== user?.id) {
+          await safeAnswerCallbackQuery(bot, query.id, { text: t("extend.notFound", L) });
+          return true;
+        }
+        if (!ACTIVE_RENTAL_STATUSES.includes(order.status)) {
+          await bot.sendMessage(
+            chatId,
+            t("extend.notActive", L, { status: order.status })
+          );
+          await safeAnswerCallbackQuery(bot, query.id);
+          return true;
+        }
+        await bot.sendMessage(
+          chatId,
+          t("extend.askHours", L, {
+            id: orderId,
+            console: order.consoleType,
+            end: formatDatetime(order.endDatetime),
+          }),
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: t("extend.day1", L), callback_data: `extend:req:${orderId}:24` },
+                  { text: t("extend.day2", L), callback_data: `extend:req:${orderId}:48` },
+                ],
+                [{ text: t("extend.day3", L), callback_data: `extend:req:${orderId}:72` }],
               ],
-              [{ text: "3 kun", callback_data: `extend:req:${orderId}:72` }],
-            ],
-          },
-        });
+            },
+          }
+        );
       } else if (data.startsWith("extend:req:")) {
         const [, , orderIdRaw, hoursRaw] = data.split(":");
         const user = await userService.getUserByTelegramId(telegramId);
-        await rentalExtensionService.requestExtension(Number(orderIdRaw), user.id, Number(hoursRaw));
-        await bot.sendMessage(chatId, "✅ Uzaytirish so'rovi yuborildi. Admin tasdiqlashini kuting.");
+        const L = resolveLang(user?.language);
+        try {
+          const result = await rentalExtensionService.requestExtension(
+            Number(orderIdRaw),
+            user.id,
+            Number(hoursRaw),
+            L
+          );
+          await bot.sendMessage(
+            chatId,
+            t("extend.requested", L, {
+              duration: pricingService.formatDurationLabel(result.hours, L),
+              price: result.extraPrice.toLocaleString(),
+              newEnd: formatDatetime(result.newEnd),
+            })
+          );
+          try {
+            await bot.editMessageReplyMarkup(
+              { inline_keyboard: [] },
+              {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+              }
+            );
+          } catch (_) {}
+        } catch (err) {
+          const errText = err.messageKey ? t(err.messageKey, L) : err.message;
+          await bot.sendMessage(chatId, t("extend.fail", L, { error: errText }));
+        }
       } else if (data === "order:confirm") {
         const user = await userService.getUserByTelegramId(telegramId);
+        const L = resolveLang(user?.language);
         if (!user) {
-          await bot.sendMessage(chatId, "❗️ Foydalanuvchi topilmadi. /start buyrug'ini yuboring.");
+          await bot.sendMessage(chatId, t("welcome.userNotFound", L));
         } else {
-          await orderScene.handleConfirm(bot, chatId, user);
+          await orderScene.handleConfirm(bot, chatId, user, query);
+          return true;
         }
       } else if (data === "order:cancel") {
-        await orderScene.handleCancel(bot, chatId);
+        await orderScene.handleCancel(bot, chatId, query);
+        return true;
+      } else if (data === "order:noop") {
+        await safeAnswerCallbackQuery(bot, query.id);
+        return true;
       } else if (data.startsWith("rate:")) {
         const [, orderId, rating] = data.split(":");
         const { submitReview } = require("../handlers/reviewHelper");
@@ -205,8 +344,12 @@ function register(bot) {
       await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       logger.error("Callback query handler xatoligi", { context: "Bot", error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Xatolik yuz berdi, qaytadan urinib ko'ring." });
+      const user = await userService.getUserByTelegramId(telegramId).catch(() => null);
+      await safeAnswerCallbackQuery(bot, query.id, {
+        text: t("errors.callback", resolveLang(user?.language)),
+      });
     }
+    return true;
   });
 }
 

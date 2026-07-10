@@ -3,12 +3,15 @@ function newOrderKeyboard(orderId) {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅ Confirm Order", callback_data: `admin:order:confirm:${orderId}` },
-          { text: "❌ Cancel Order", callback_data: `admin:order:cancel:${orderId}` },
+          { text: "✅ Tasdiqlash", callback_data: `admin:order:confirm:${orderId}` },
+          { text: "❌ Rad etish", callback_data: `admin:order:reject:${orderId}` },
         ],
         [
-          { text: "👤 Assign Courier", callback_data: `admin:order:assign:${orderId}` },
-          { text: "📋 View Details", callback_data: `admin:order:details:${orderId}` },
+          { text: "🚫 Bekor qilish", callback_data: `admin:order:cancel:${orderId}` },
+        ],
+        [
+          { text: "👤 Kuryer biriktirish", callback_data: `admin:order:assign:${orderId}` },
+          { text: "📋 Tafsilotlar", callback_data: `admin:order:details:${orderId}` },
         ],
       ],
     },

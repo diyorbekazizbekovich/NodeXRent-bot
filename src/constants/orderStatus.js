@@ -2,9 +2,11 @@ const OrderStatus = {
   PENDING: "PENDING",
   COURIER_ASSIGNED: "COURIER_ASSIGNED",
   ACCEPTED: "ACCEPTED",
+  REJECTED: "REJECTED",
   ON_THE_WAY: "ON_THE_WAY",
   ARRIVED: "ARRIVED",
   DELIVERED: "DELIVERED",
+  ACTIVE: "ACTIVE",
   RETURN_REQUESTED: "RETURN_REQUESTED",
   RETURNED: "RETURNED",
   COMPLETED: "COMPLETED",
@@ -16,9 +18,11 @@ const STATUS_LABELS_UZ = {
   PENDING: "Kutilayotgan",
   COURIER_ASSIGNED: "Kuryer biriktirildi",
   ACCEPTED: "Qabul qilingan",
+  REJECTED: "Rad etilgan",
   ON_THE_WAY: "Yo'lda",
   ARRIVED: "Yetib keldi",
   DELIVERED: "Yetkazib berilgan",
+  ACTIVE: "Faol ijara",
   RETURN_REQUESTED: "Qaytarish so'raldi",
   RETURNED: "PlayStation qaytarib olindi",
   COMPLETED: "Yakunlandi",
@@ -33,19 +37,20 @@ const ADMIN_FILTER_GROUPS = [
     label: "Qabul qilingan",
     statuses: ["COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED"],
   },
-  { key: "DELIVERED", label: "Yetkazib berilgan", statuses: ["DELIVERED"] },
+  { key: "DELIVERED", label: "Yetkazib berilgan", statuses: ["DELIVERED", "ACTIVE"] },
   {
     key: "RENTING",
     label: "Ijarada",
-    statuses: ["DELIVERED"],
+    statuses: ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"],
   },
   { key: "RETURNED", label: "PlayStation qaytarib olindi", statuses: ["RETURNED", "COMPLETED"] },
-  { key: "CANCELLED", label: "Bekor qilingan", statuses: ["CANCELLED", "EXPIRED"] },
+  { key: "CANCELLED", label: "Bekor qilingan", statuses: ["CANCELLED", "EXPIRED", "REJECTED"] },
 ];
 
-const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED"];
+const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED", "ACTIVE"];
 
-const ACTIVE_RENTAL_STATUSES = ["DELIVERED", "RETURN_REQUESTED"];
+/** Faol ijara: qurilma mijozda */
+const ACTIVE_RENTAL_STATUSES = ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"];
 
 const TIMELINE_LABELS = {
   PENDING: "Buyurtma yaratildi",
@@ -53,10 +58,12 @@ const TIMELINE_LABELS = {
   ACCEPTED: "Kuryer qabul qildi",
   ON_THE_WAY: "Kuryer yo'lga chiqdi",
   ARRIVED: "Kuryer yetib keldi",
-  DELIVERED: "Yetkazildi — ijara davom etmoqda",
+  DELIVERED: "Yetkazildi",
+  ACTIVE: "Faol ijara",
   RETURN_REQUESTED: "Qaytarish so'raldi",
   RETURNED: "PlayStation qaytarib olindi",
   COMPLETED: "Yakunlandi",
+  REJECTED: "Rad etildi",
   CANCELLED: "Bekor qilindi",
   EXPIRED: "Muddati tugadi",
 };

@@ -1,14 +1,18 @@
-function mainMenuKeyboard() {
+function mainMenuKeyboard({ isSuperAdmin = false } = {}) {
+  const rows = [
+    ["📊 Dashboard", "📅 Bugun"],
+    ["👥 CRM", "📦 Buyurtmalar"],
+    ["🎮 Inventar", "📈 Analytics"],
+    ["🚚 Kuryerlar", "💰 Narxlar"],
+    ["💾 Backup", "📋 Loglar"],
+    ["🏷️ Promo", "📢 Reklama", "⚙️ Sozlamalar"],
+  ];
+  if (isSuperAdmin) {
+    rows.push(["🗑 Bazani tozalash"]);
+  }
   return {
     reply_markup: {
-      keyboard: [
-        ["📊 Dashboard", "📅 Bugun"],
-        ["👥 CRM", "📦 Buyurtmalar"],
-        ["🎮 Inventar", "📈 Analytics"],
-        ["🚚 Kuryerlar", "💰 Narxlar"],
-        ["💾 Backup", "📋 Loglar"],
-        ["🏷️ Promo", "📢 Reklama", "⚙️ Sozlamalar"],
-      ],
+      keyboard: rows,
       resize_keyboard: true,
     },
   };

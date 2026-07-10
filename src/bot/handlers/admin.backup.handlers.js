@@ -3,6 +3,7 @@ const auditLogService = require("../../services/auditLog.service");
 const prisma = require("../../config/prisma");
 const fs = require("fs");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
+const { addCallbackHandler } = require("../events/callbackRouter");
 
 function backupKeyboard() {
   return {
@@ -17,15 +18,15 @@ function backupKeyboard() {
 }
 
 function registerAdminBackupHandlers(bot, isAdmin) {
-  bot.on("callback_query", async (query) => {
+  addCallbackHandler("admin-backup", async (bot, query) => {
     const data = query.data;
-    if (!data.startsWith("admin:backup:") && data !== "admin:audit:clear") return;
+    if (!data?.startsWith("admin:backup:") && data !== "admin:audit:clear") return false;
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
     if (!(await isAdmin(telegramId))) {
       await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
-      return;
+      return true;
     }
 
     const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
@@ -67,6 +68,7 @@ function registerAdminBackupHandlers(bot, isAdmin) {
     } catch (err) {
       await safeAnswerCallbackQuery(bot, query.id, { text: err.message });
     }
+    return true;
   });
 }
 

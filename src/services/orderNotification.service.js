@@ -84,6 +84,8 @@ async function notifyCouriersNewOrder(order) {
 }
 
 async function notifyCustomerOrderAccepted(order) {
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(order.user?.language);
   const courier = order.courier;
   const courierName = courier?.fullName || "—";
   const courierPhone = courier?.phone || "—";
@@ -94,12 +96,11 @@ async function notifyCustomerOrderAccepted(order) {
     recipientType: "user",
     recipientTelegramId: order.user.telegramId.toString(),
     recipientId: order.userId,
-    text:
-      `🚚 <b>Sizning buyurtmangizni kuryer qabul qildi.</b>\n\n` +
-      `👤 <b>Ismi:</b>\n${courierName}\n\n` +
-      `📞 <b>Telefon:</b>\n${courierPhone}\n\n` +
-      `⏱ Taxminiy yetib borish: 30-60 daqiqa\n\n` +
-      `Buyurtma raqami: #${order.id}`,
+    text: t("notify.accepted", L, {
+      name: courierName,
+      phone: courierPhone,
+      id: order.id,
+    }),
     options: { parse_mode: "HTML" },
   });
 }
@@ -127,7 +128,9 @@ async function notifyAdminCourierAccepted(order) {
 }
 
 async function notifyStatusChange(order, statusLabel, { customerText, adminText } = {}) {
-  const defaultCustomer = `📦 Buyurtma #${order.id}: ${statusLabel}`;
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(order.user?.language);
+  const defaultCustomer = t("notify.statusDefault", L, { id: order.id, status: statusLabel });
   const defaultAdmin = `📦 Buyurtma #${order.id} — ${statusLabel}`;
 
   await notify({
@@ -171,12 +174,10 @@ async function notifySingleCourierAssignment(order, courier) {
 }
 
 async function notifyPlaystationReturned(order) {
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(order.user?.language);
   const unitCode = order.inventoryUnit?.unitCode || "—";
-  const customerText =
-    `↩️ <b>PlayStation qaytarib olindi</b>\n\n` +
-    `Buyurtma: #${order.id}\n` +
-    `Qurilma: ${unitCode}\n` +
-    `Rahmat! Xizmatimizdan foydalanganingiz uchun minnatdormiz.`;
+  const customerText = t("notify.returned", L, { id: order.id, unit: unitCode });
 
   const adminText =
     `↩️ <b>PlayStation qaytarildi</b>\n\n` +
@@ -214,6 +215,44 @@ async function sendLocation(chatId, latitude, longitude) {
   });
 }
 
+async function notifyOrderRejected(order, { by, courierName } = {}) {
+  const { t, resolveLang } = require("../i18n");
+  const L = resolveLang(order.user?.language);
+  const customerText =
+    by === "courier"
+      ? t("notify.rejectedCourier", L, { id: order.id })
+      : t("notify.rejectedAdmin", L, { id: order.id });
+
+  await notify({
+    orderId: order.id,
+    type: "ORDER_REJECTED",
+    recipientType: "user",
+    recipientTelegramId: order.user.telegramId.toString(),
+    recipientId: order.userId,
+    text: customerText,
+  });
+
+  if (by === "courier") {
+    const admins = await getAdminRecipients();
+    const adminText =
+      `❌ <b>Buyurtma #${order.id} rad etildi</b>\n\n` +
+      `🚚 Kuryer: ${courierName || "—"}\n` +
+      `👤 Mijoz: ${order.user?.fullName || "—"}\n` +
+      `📌 Status: REJECTED`;
+
+    for (const admin of admins) {
+      await notify({
+        orderId: order.id,
+        type: "ORDER_REJECTED",
+        recipientType: "admin",
+        recipientTelegramId: String(admin.telegramId),
+        recipientId: admin.recipientId,
+        text: adminText,
+      });
+    }
+  }
+}
+
 module.exports = {
   buildOrderDetailsText,
   notifyAdminsNewOrder,
@@ -223,5 +262,6 @@ module.exports = {
   notifyStatusChange,
   notifyPlaystationReturned,
   notifySingleCourierAssignment,
+  notifyOrderRejected,
   sendLocation,
 };

@@ -4,7 +4,6 @@ const adminKeyboards = require("../keyboards/admin.keyboards");
 const reportService = require("../../services/report.service");
 const dashboardService = require("../../services/dashboard.service");
 const inventoryService = require("../../services/inventory.service");
-const analyticsService = require("../../services/analytics.service");
 const auditLogService = require("../../services/auditLog.service");
 const settingsService = require("../../services/settings.service");
 const pricingService = require("../../services/pricing.service");
@@ -33,14 +32,67 @@ const courierStatsService = require("../../services/courierStats.service");
 const realtimeDashboardService = require("../../services/realtimeDashboard.service");
 const broadcastService = require("../../services/broadcast.service");
 const promoService = require("../../services/promo.service");
+const { promoListKeyboard, promoActionKeyboard } = require("../keyboards/admin.promo.keyboards");
 const {
   registerAdminCrmHandlers,
   handleCrmAdminMessage,
   showCrmMenu,
 } = require("./admin.crm.handlers");
+const {
+  registerAdminSupportHandlers,
+  handleAdminSupportMessage,
+} = require("./admin.support.handlers");
+const {
+  registerAdminAnalyticsHandlers,
+  showAnalytics,
+} = require("./admin.analytics.handlers");
+const {
+  registerAdminFactoryResetHandlers,
+  handleFactoryResetMessage,
+  startFactoryResetFlow,
+} = require("./admin.factoryReset.handlers");
+const factoryResetService = require("../../services/factoryReset.service");
 const { registerAdminBackupHandlers, backupKeyboard } = require("./admin.backup.handlers");
+const adminInventoryItem = require("./admin.inventoryItem.handlers");
 const { label, filterGroup } = require("../../constants/orderStatus");
 const { buildOrderTimeline } = require("../../utils/orderTimeline");
+const { addCallbackHandler } = require("../events/callbackRouter");
+
+function isAdminMainCallback(data) {
+  if (!data) return false;
+  return (
+    data.startsWith("admin:promo:") ||
+    data.startsWith("admin:settings:") ||
+    data.startsWith("admin:inv:") ||
+    data.startsWith("admin:invitem:") ||
+    data.startsWith("admin:orders:") ||
+    data.startsWith("admin:order:timeline:") ||
+    data.startsWith("admin:ext:") ||
+    data.startsWith("admin:dashboard:")
+  );
+}
+
+/** Reply-keyboard menyu — faol compose/sessionni yutib yubormasligi uchun */
+const ADMIN_MENU_TEXTS = new Set([
+  "📊 Dashboard",
+  "📅 Bugun",
+  "👥 CRM",
+  "📦 Buyurtmalar",
+  "🎮 Inventar",
+  "🎮 PlayStationlar",
+  "📈 Analytics",
+  "🚚 Kuryerlar",
+  "💰 Narxlar",
+  "💾 Backup",
+  "📋 Loglar",
+  "🏷️ Promo",
+  "🏷️ Promo-kodlar",
+  "📢 Reklama",
+  "⚙️ Sozlamalar",
+  "📊 Statistika",
+  "👥 Foydalanuvchilar",
+  "🗑 Bazani tozalash",
+]);
 
 async function isAdmin(telegramId) {
   if (env.ADMIN_TELEGRAM_IDS.includes(Number(telegramId))) return true;
@@ -53,6 +105,9 @@ function register(bot) {
   registerAdminOrderHandlers(bot, isAdmin);
   registerAdminCourierHandlers(bot, isAdmin);
   registerAdminCrmHandlers(bot, isAdmin);
+  registerAdminSupportHandlers(bot, isAdmin);
+  registerAdminAnalyticsHandlers(bot, isAdmin);
+  registerAdminFactoryResetHandlers(bot, isAdmin);
   registerAdminBackupHandlers(bot, isAdmin);
 
   bot.onText(/\/admin/, async (msg) => {
@@ -73,7 +128,9 @@ function register(bot) {
       "\n\n_🔄 Real-time dashboard faol_";
     const sent = await bot.sendMessage(chatId, text, {
       parse_mode: "Markdown",
-      ...adminKeyboards.mainMenuKeyboard(),
+      ...adminKeyboards.mainMenuKeyboard({
+        isSuperAdmin: factoryResetService.isSuperAdmin(telegramId),
+      }),
     });
     if (await realtimeDashboardService.isEnabled(telegramId)) {
       realtimeDashboardService.subscribe(chatId, sent.message_id);
@@ -85,7 +142,20 @@ function register(bot) {
     const telegramId = msg.from.id;
     if (!(await isAdmin(telegramId))) return;
 
-    const session = sessionStore.getSession(chatId);
+    if (await adminInventoryItem.handleText(bot, msg)) return;
+
+    let session = sessionStore.getSession(chatId);
+
+    // Menyu tugmasi bosilsa — compose/sessionni tozalab, menyuga o'tkazamiz
+    // (aks holda support/CRM/ads session Analytics va boshqa tugmalarni yutib yuboradi)
+    if (msg.text && ADMIN_MENU_TEXTS.has(msg.text.trim()) && session.step) {
+      sessionStore.clearSession(chatId);
+      session = sessionStore.getSession(chatId);
+    }
+
+    // Support chat compose — matn + media (ads dan oldin)
+    if (await handleAdminSupportMessage(bot, chatId, msg, session)) return;
+    if (msg.text && (await handleFactoryResetMessage(bot, chatId, msg, session))) return;
 
     if (session.step === "admin:ads:await") {
       const adminRecord = await prisma.admin.upsert({
@@ -184,47 +254,106 @@ function register(bot) {
 
     // ---- Promo-kod yaratish jarayoni ----
     if (session.step === "admin:promo:code") {
-      sessionStore.updateData(chatId, { _code: msg.text.trim() });
-      sessionStore.setStep(chatId, "admin:promo:discount");
-      await bot.sendMessage(chatId, "Chegirma foizini kiriting (masalan 15):");
+      try {
+        const code = promoService.normalizeCode(msg.text);
+        if (!code || code.length < 2) throw new Error("Kod kamida 2 belgi bo'lishi kerak");
+        sessionStore.updateData(chatId, { _code: code });
+        sessionStore.setStep(chatId, "admin:promo:discount");
+        await bot.sendMessage(chatId, "Chegirma foizini kiriting (1–100, masalan 15):");
+      } catch (err) {
+        await bot.sendMessage(chatId, `❗️ ${err.message}`);
+      }
       return;
     }
     if (session.step === "admin:promo:discount") {
-      sessionStore.updateData(chatId, { _discount: Number(msg.text.trim()) });
+      const discount = Number(msg.text.trim());
+      if (!Number.isFinite(discount) || discount <= 0 || discount > 100) {
+        await bot.sendMessage(chatId, "❗️ Foiz 1–100 oralig'ida bo'lishi kerak. Qayta kiriting:");
+        return;
+      }
+      sessionStore.updateData(chatId, { _discount: discount });
       sessionStore.setStep(chatId, "admin:promo:limit");
-      await bot.sendMessage(chatId, "Foydalanish limitini kiriting (masalan 100):");
+      await bot.sendMessage(chatId, "Umumiy foydalanish limitini kiriting (masalan 100):");
       return;
     }
     if (session.step === "admin:promo:limit") {
-      sessionStore.updateData(chatId, { _limit: Number(msg.text.trim()) });
+      const limit = Number(msg.text.trim());
+      if (!Number.isInteger(limit) || limit <= 0) {
+        await bot.sendMessage(chatId, "❗️ Limit musbat butun son bo'lishi kerak. Qayta kiriting:");
+        return;
+      }
+      sessionStore.updateData(chatId, { _limit: limit });
+      sessionStore.setStep(chatId, "admin:promo:perUser");
+      await bot.sendMessage(chatId, "Bitta foydalanuvchi necha marta ishlata oladi? (masalan 1):");
+      return;
+    }
+    if (session.step === "admin:promo:perUser") {
+      const perUser = Number(msg.text.trim());
+      if (!Number.isInteger(perUser) || perUser < 1) {
+        await bot.sendMessage(chatId, "❗️ Per-user limit 1 yoki undan katta bo'lishi kerak:");
+        return;
+      }
+      sessionStore.updateData(chatId, { _perUser: perUser });
       sessionStore.setStep(chatId, "admin:promo:days");
       await bot.sendMessage(chatId, "Necha kun amal qilishini kiriting (masalan 30):");
       return;
     }
     if (session.step === "admin:promo:days") {
-      const { _code, _discount, _limit } = session.data;
       const days = Number(msg.text.trim());
+      if (!Number.isInteger(days) || days <= 0) {
+        await bot.sendMessage(chatId, "❗️ Kunlar soni musbat butun son bo'lishi kerak:");
+        return;
+      }
+      const { _code, _discount, _limit, _perUser } = session.data;
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + days);
 
-      const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
-      const promo = await promoService.createPromo(
-        {
-          code: _code,
-          discountType: "PERCENT",
-          discountPercent: _discount,
-          usageLimit: _limit,
-          expiresAt,
-          perUserLimit: 1,
-        },
-        { telegramId, adminId: adminRecord?.id }
-      );
-      sessionStore.clearSession(chatId);
-      await bot.sendMessage(
-        chatId,
-        `✅ Promo-kod yaratildi: <b>${promo.code}</b> (-${promo.discountPercent}%, limit: ${promo.usageLimit}, muddat: ${days} kun)`,
-        { parse_mode: "HTML" }
-      );
+      try {
+        const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
+        const promo = await promoService.createPromo(
+          {
+            code: _code,
+            discountType: "PERCENT",
+            discountPercent: _discount,
+            usageLimit: _limit,
+            perUserLimit: _perUser || 1,
+            expiresAt,
+          },
+          { telegramId, adminId: adminRecord?.id }
+        );
+        sessionStore.clearSession(chatId);
+        await bot.sendMessage(
+          chatId,
+          `✅ Promo-kod yaratildi:\n\n` +
+            `<b>${promo.code}</b>\n` +
+            `Chegirma: -${promo.discountPercent}%\n` +
+            `Limit: ${promo.usageLimit} | Per-user: ${promo.perUserLimit}\n` +
+            `Muddat: ${days} kun`,
+          { parse_mode: "HTML", ...promoListKeyboard(await promoService.listPromos()) }
+        );
+      } catch (err) {
+        await bot.sendMessage(chatId, `❗️ ${err.message}`);
+      }
+      return;
+    }
+    if (session.step === "admin:promo:editLimitValue") {
+      const limit = Number(msg.text.trim());
+      if (!Number.isInteger(limit) || limit <= 0) {
+        await bot.sendMessage(chatId, "❗️ Limit musbat butun son bo'lishi kerak:");
+        return;
+      }
+      try {
+        const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
+        const promo = await promoService.updatePromo(
+          session.data._promoId,
+          { usageLimit: limit },
+          { telegramId, adminId: adminRecord?.id }
+        );
+        sessionStore.clearSession(chatId);
+        await bot.sendMessage(chatId, `✅ ${promo.code} limiti yangilandi: ${limit}`);
+      } catch (err) {
+        await bot.sendMessage(chatId, `❗️ ${err.message}`);
+      }
       return;
     }
 
@@ -257,13 +386,9 @@ function register(bot) {
       case "🏷️ Promo-kodlar": {
         const promos = await promoService.listPromos();
         const lines = promos.length ? promos.map(promoService.formatPromoLine).join("\n") : "Promo-kodlar yo'q.";
-        await bot.sendMessage(chatId, `🏷️ *Promo-kodlar*\n\n${lines}`, {
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "➕ Yangi promo", callback_data: "admin:promo:new" }],
-            ],
-          },
+        await bot.sendMessage(chatId, `🏷️ <b>Promo-kodlar</b>\n\n${lines}`, {
+          parse_mode: "HTML",
+          ...promoListKeyboard(promos),
         });
         return;
       }
@@ -299,11 +424,19 @@ function register(bot) {
           parse_mode: "Markdown",
           ...adminKeyboards.inventoryTypeKeyboard(),
         });
+        await bot.sendMessage(
+          chatId,
+          "📦 Professional inventar (Console / Joystick / HDMI / Power):",
+          adminInventoryItem.typeKeyboard()
+        );
         return;
       }
       case "📈 Analytics": {
-        const report = await analyticsService.getAnalyticsReport();
-        await bot.sendMessage(chatId, analyticsService.formatAnalytics(report), { parse_mode: "Markdown" });
+        try {
+          await showAnalytics(bot, chatId, "today");
+        } catch (err) {
+          // showAnalytics allaqachon xabar yuborgan bo'lishi mumkin
+        }
         return;
       }
       case "📋 Loglar": {
@@ -350,35 +483,112 @@ function register(bot) {
         await bot.sendMessage(chatId, "💰 Narxlar boshqaruvi:", adminPricingKeyboards.pricingMenuKeyboard());
         return;
       }
+      case "🗑 Bazani tozalash": {
+        if (!factoryResetService.isSuperAdmin(telegramId)) {
+          await bot.sendMessage(chatId, "❗️ Bu amal faqat Super Admin uchun.");
+          return;
+        }
+        await startFactoryResetFlow(bot, chatId, telegramId);
+        return;
+      }
       default:
         return;
     }
   });
 
-  bot.on("callback_query", async (query) => {
+  addCallbackHandler("admin-main", async (bot, query) => {
     const data = query.data;
+    if (!isAdminMainCallback(data)) return false;
+
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
     if (!(await isAdmin(telegramId))) {
       await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
-      return;
+      return true;
     }
+
+    if (await adminInventoryItem.handleCallback(bot, query, data)) return true;
 
     if (data === "admin:promo:new") {
       sessionStore.setStep(chatId, "admin:promo:code");
       await bot.sendMessage(chatId, "Yangi promo-kod matnini kiriting (masalan SUMMER2026):");
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
+    }
+
+    if (data === "admin:promo:list") {
+      const promos = await promoService.listPromos();
+      const lines = promos.length ? promos.map(promoService.formatPromoLine).join("\n") : "Promo-kodlar yo'q.";
+      await bot.sendMessage(chatId, `🏷️ <b>Promo-kodlar</b>\n\n${lines}`, {
+        parse_mode: "HTML",
+        ...promoListKeyboard(promos),
+      });
+      await safeAnswerCallbackQuery(bot, query.id);
+      return true;
+    }
+
+    if (data.startsWith("admin:promo:view:")) {
+      const id = Number(data.split(":")[3]);
+      const promo = await prisma.promocode.findUnique({ where: { id } });
+      if (!promo) {
+        await safeAnswerCallbackQuery(bot, query.id, { text: "Topilmadi" });
+        return true;
+      }
+      await bot.sendMessage(chatId, promoService.formatPromoDetails(promo), {
+        parse_mode: "HTML",
+        ...promoActionKeyboard(promo.id, promo.isActive),
+      });
+      await safeAnswerCallbackQuery(bot, query.id);
+      return true;
     }
 
     if (data.startsWith("admin:promo:toggle:")) {
       const id = Number(data.split(":")[3]);
       const promo = await prisma.promocode.findUnique({ where: { id } });
+      if (!promo) {
+        await safeAnswerCallbackQuery(bot, query.id, { text: "Topilmadi" });
+        return true;
+      }
       const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
-      await promoService.togglePromo(id, !promo.isActive, { telegramId, adminId: adminRecord?.id });
-      await bot.sendMessage(chatId, `✅ Promo holati o'zgartirildi.`);
+      const updated = await promoService.togglePromo(id, !promo.isActive, {
+        telegramId,
+        adminId: adminRecord?.id,
+      });
+      await bot.sendMessage(
+        chatId,
+        `✅ ${updated.code} endi ${updated.isActive ? "faol" : "nofaol"}.`,
+        promoActionKeyboard(updated.id, updated.isActive)
+      );
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
+    }
+
+    if (data.startsWith("admin:promo:editLimit:")) {
+      const id = Number(data.split(":")[3]);
+      sessionStore.updateData(chatId, { _promoId: id });
+      sessionStore.setStep(chatId, "admin:promo:editLimitValue");
+      await bot.sendMessage(chatId, "Yangi umumiy foydalanish limitini kiriting:");
+      await safeAnswerCallbackQuery(bot, query.id);
+      return true;
+    }
+
+    if (data.startsWith("admin:promo:delete:")) {
+      const id = Number(data.split(":")[3]);
+      try {
+        const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
+        const deleted = await promoService.deletePromo(id, { telegramId, adminId: adminRecord?.id });
+        await bot.sendMessage(chatId, `🗑 Promo o'chirildi: ${deleted.code}`);
+        const promos = await promoService.listPromos();
+        await bot.sendMessage(
+          chatId,
+          `🏷️ <b>Promo-kodlar</b>\n\n${promos.map(promoService.formatPromoLine).join("\n") || "Bo'sh"}`,
+          { parse_mode: "HTML", ...promoListKeyboard(promos) }
+        );
+      } catch (err) {
+        await bot.sendMessage(chatId, `❗️ ${err.message}`);
+      }
+      await safeAnswerCallbackQuery(bot, query.id);
+      return true;
     }
 
     if (data.startsWith("admin:ext:")) {
@@ -397,7 +607,7 @@ function register(bot) {
         await bot.sendMessage(chatId, `❌ ${err.message}`);
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data === "admin:settings:realtime") {
@@ -418,7 +628,7 @@ function register(bot) {
         await bot.sendMessage(chatId, "✅ Real-time dashboard o'chirildi.");
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data === "admin:dashboard:unsubscribe") {
@@ -426,7 +636,7 @@ function register(bot) {
       await realtimeDashboardService.setEnabled(telegramId, false, { telegramId, adminId: adminRecord?.id });
       await bot.sendMessage(chatId, "Real-time dashboard o'chirildi.");
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data === "admin:settings:maintenance") {
@@ -435,7 +645,7 @@ function register(bot) {
       await maintenanceService.setEnabled(!current, { telegramId, adminId: adminRecord?.id });
       await bot.sendMessage(chatId, current ? "✅ Maintenance o'chirildi." : "🚧 Maintenance yoqildi.");
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data === "admin:inv:units") {
@@ -446,7 +656,7 @@ function register(bot) {
         reply_markup: { inline_keyboard: rows },
       });
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data.startsWith("admin:inv:unit:")) {
@@ -454,7 +664,7 @@ function register(bot) {
       const unit = await inventoryService.getUnitById(unitId);
       await bot.sendMessage(chatId, inventoryService.formatUnitDetail(unit), { parse_mode: "Markdown" });
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data.startsWith("admin:orders:filter:")) {
@@ -478,7 +688,7 @@ function register(bot) {
         }
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data.startsWith("admin:order:timeline:")) {
@@ -488,7 +698,7 @@ function register(bot) {
         await bot.sendMessage(chatId, buildOrderTimeline(order), { parse_mode: "Markdown" });
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data.startsWith("admin:inv:")) {
@@ -507,7 +717,7 @@ function register(bot) {
           sessionStore.updateData(chatId, { _consoleType: consoleType });
           await bot.sendMessage(chatId, `${consoleType} uchun yangi jami sonni kiriting (hozir: ${current}):`);
           await safeAnswerCallbackQuery(bot, query.id);
-          return;
+          return true;
         } else if (action === "refresh") {
           // noop
         }
@@ -517,7 +727,7 @@ function register(bot) {
         await bot.sendMessage(chatId, `❌ ${err.message}`);
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
     if (data === "admin:settings:delivery") {
@@ -525,10 +735,10 @@ function register(bot) {
       const fee = await settingsService.getDeliveryFee();
       await bot.sendMessage(chatId, `Hozirgi narx: ${fee.toLocaleString()} so'm.\nYangi narxni kiriting:`);
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
 
-    if (!data.startsWith("admin:orders:")) return;
+    if (!data.startsWith("admin:orders:")) return false;
     const status = data.split(":")[2];
     const orders = await orderService.listOrdersByStatus(status, { take: 15 });
     const lines = orders.map(
@@ -536,7 +746,9 @@ function register(bot) {
     );
     await bot.sendMessage(chatId, lines.join("\n") || `"${label(status)}" statusida buyurtmalar yo'q.`);
     await safeAnswerCallbackQuery(bot, query.id);
+    return true;
   });
+
 }
 
-module.exports = { register, isAdmin };
+module.exports = { register, isAdmin, isSuperAdmin: factoryResetService.isSuperAdmin };

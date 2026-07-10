@@ -1,222 +1,394 @@
 const prisma = require("../config/prisma");
-const { REVENUE_STATUSES } = require("../constants/orderStatus");
-const { startOfDay, endOfDay, daysAgo, startOfMonth } = require("../utils/dateHelper");
+const {
+  REVENUE_STATUSES,
+  ACTIVE_RENTAL_STATUSES,
+} = require("../constants/orderStatus");
+const { startOfDay, endOfDay, daysAgo, startOfMonth, formatDatetime } = require("../utils/dateHelper");
 
-const ALLOWED_RENTAL_HOURS = [24, 48, 72];
+const PERIODS = Object.freeze({
+  today: "today",
+  week: "week",
+  month: "month",
+  all: "all",
+});
+
+const PERIOD_LABELS = {
+  today: "📅 Bugun",
+  week: "📆 Hafta",
+  month: "🗓 Oy",
+  all: "♾ Umumiy",
+};
 
 function formatMoney(n) {
   return `${Math.round(Number(n) || 0).toLocaleString("uz-UZ")} so'm`;
 }
 
-function bar(value, max, width = 10) {
-  const len = max > 0 ? Math.round((value / max) * width) : 0;
-  return "█".repeat(len) + "░".repeat(Math.max(width - len, 0));
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
-async function sumRevenue(where) {
+function periodRange(period, now = new Date()) {
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+  switch (period) {
+    case PERIODS.today:
+      return { gte: todayStart, lte: todayEnd, label: PERIOD_LABELS.today };
+    case PERIODS.week:
+      return { gte: daysAgo(7, now), lte: todayEnd, label: PERIOD_LABELS.week };
+    case PERIODS.month:
+      return { gte: startOfMonth(now), lte: todayEnd, label: PERIOD_LABELS.month };
+    case PERIODS.all:
+    default:
+      return { gte: null, lte: null, label: PERIOD_LABELS.all };
+  }
+}
+
+function createdAtFilter(range) {
+  if (!range.gte) return {};
+  const createdAt = { gte: range.gte };
+  if (range.lte) createdAt.lte = range.lte;
+  return { createdAt };
+}
+
+async function sumOrderMoney(where) {
   const agg = await prisma.order.aggregate({
     where: { ...where, status: { in: REVENUE_STATUSES } },
     _sum: { totalPrice: true, deliveryFee: true },
   });
-  return Number(agg._sum.totalPrice ?? 0) + Number(agg._sum.deliveryFee ?? 0);
-}
-
-async function countOrders(where) {
-  return prisma.order.count({ where });
-}
-
-async function getFullAnalytics() {
-  const now = new Date();
-  const todayStart = startOfDay(now);
-  const todayEnd = endOfDay(now);
-  const weekStart = daysAgo(7);
-  const monthStart = startOfMonth(now);
-
-  const [
-    totalUsers,
-    usersToday,
-    usersWeek,
-    usersMonth,
-    totalOrders,
-    ordersToday,
-    ordersWeek,
-    ordersMonth,
-    completedOrders,
-    cancelledOrders,
-    pendingOrders,
-    revenueToday,
-    revenueWeek,
-    revenueMonth,
-    revenueTotal,
-    topConsole,
-    topDuration,
-    topCourierRow,
-    promoStats,
-    returningCustomersRaw,
-    avgOrder,
-    dailyRevenue,
-    dailyOrders,
-  ] = await Promise.all([
-    prisma.user.count(),
-    prisma.user.count({ where: { createdAt: { gte: todayStart, lte: todayEnd } } }),
-    prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
-    prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
-    prisma.order.count(),
-    countOrders({ createdAt: { gte: todayStart, lte: todayEnd } }),
-    countOrders({ createdAt: { gte: weekStart } }),
-    countOrders({ createdAt: { gte: monthStart } }),
-    countOrders({ status: { in: ["COMPLETED", "RETURNED"] } }),
-    countOrders({ status: { in: ["CANCELLED", "EXPIRED"] } }),
-    countOrders({ status: "PENDING" }),
-    sumRevenue({ createdAt: { gte: todayStart, lte: todayEnd } }),
-    sumRevenue({ createdAt: { gte: weekStart } }),
-    sumRevenue({ createdAt: { gte: monthStart } }),
-    sumRevenue({}),
-    prisma.order.groupBy({
-      by: ["consoleType"],
-      where: { status: { in: REVENUE_STATUSES } },
-      _count: { _all: true },
-      orderBy: { _count: { consoleType: "desc" } },
-      take: 1,
-    }),
-    prisma.order.groupBy({
-      by: ["rentalPriceId"],
-      where: { status: { in: REVENUE_STATUSES } },
-      _count: { _all: true },
-      orderBy: { _count: { rentalPriceId: "desc" } },
-      take: 1,
-    }),
-    prisma.order.groupBy({
-      by: ["courierId"],
-      where: { courierId: { not: null }, status: { in: REVENUE_STATUSES } },
-      _count: { _all: true },
-      orderBy: { _count: { courierId: "desc" } },
-      take: 1,
-    }),
-    prisma.promocode.findMany({
-      select: { code: true, usedCount: true, usageLimit: true, isActive: true },
-      orderBy: { usedCount: "desc" },
-      take: 5,
-    }),
-    prisma.order.groupBy({ by: ["userId"], _count: { _all: true } }),
-    prisma.order.aggregate({
-      where: { status: { in: REVENUE_STATUSES } },
-      _avg: { totalPrice: true },
-    }),
-    buildDailySeries(7, "revenue"),
-    buildDailySeries(7, "orders"),
-  ]);
-
-  let topDurationLabel = "—";
-  if (topDuration[0]) {
-    const rp = await prisma.rentalPrice.findUnique({ where: { id: topDuration[0].rentalPriceId } });
-    if (rp) topDurationLabel = rp.hours === 24 ? "1 kun" : rp.hours === 48 ? "2 kun" : rp.hours === 72 ? "3 kun" : `${rp.hours} soat`;
-  }
-
-  let topCourierName = "—";
-  if (topCourierRow[0]?.courierId) {
-    const c = await prisma.courier.findUnique({ where: { id: topCourierRow[0].courierId } });
-    topCourierName = c?.fullName || `#${topCourierRow[0].courierId}`;
-  }
-
-  const cancelRate = totalOrders > 0 ? Math.round((cancelledOrders / totalOrders) * 100) : 0;
-
   return {
-    users: { total: totalUsers, today: usersToday, week: usersWeek, month: usersMonth },
-    orders: {
-      total: totalOrders,
-      today: ordersToday,
-      week: ordersWeek,
-      month: ordersMonth,
-      completed: completedOrders,
-      cancelled: cancelledOrders,
-      pending: pendingOrders,
-      cancelRate,
-    },
-    revenue: {
-      today: revenueToday,
-      week: revenueWeek,
-      month: revenueMonth,
-      total: revenueTotal,
-      avgOrder: Number(avgOrder._avg.totalPrice ?? 0),
-    },
-    top: {
-      console: topConsole[0]?.consoleType || "—",
-      duration: topDurationLabel,
-      courier: topCourierName,
-    },
-    promoStats,
-    returningCustomers: returningCustomersRaw.filter((g) => g._count._all > 1).length,
-    dailyRevenue,
-    dailyOrders,
+    rental: Number(agg._sum.totalPrice ?? 0),
+    delivery: Number(agg._sum.deliveryFee ?? 0),
+    total: Number(agg._sum.totalPrice ?? 0) + Number(agg._sum.deliveryFee ?? 0),
   };
 }
 
-async function buildDailySeries(days, type) {
-  const rows = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = daysAgo(i);
-    const start = startOfDay(d);
-    const end = endOfDay(d);
-    const label = start.toISOString().slice(0, 10);
-    if (type === "revenue") {
-      rows.push({ label, value: await sumRevenue({ createdAt: { gte: start, lte: end } }) });
-    } else {
-      rows.push({ label, value: await countOrders({ createdAt: { gte: start, lte: end } }) });
-    }
+async function sumPromoDiscounts(where = {}) {
+  const orders = await prisma.order.findMany({
+    where: {
+      ...where,
+      promocodeId: { not: null },
+      status: { in: REVENUE_STATUSES },
+    },
+    select: {
+      totalPrice: true,
+      rentalPrice: { select: { price: true } },
+    },
+  });
+  let discount = 0;
+  for (const o of orders) {
+    const base = Number(o.rentalPrice?.price ?? 0);
+    const paid = Number(o.totalPrice ?? 0);
+    if (base > paid) discount += base - paid;
   }
-  return rows;
+  return discount;
 }
 
-function formatAnalytics(data) {
-  const u = data.users;
-  const o = data.orders;
-  const r = data.revenue;
+function pivotInventory(rows) {
+  const types = ["PS3", "PS4", "PS5"];
+  const result = {};
+  for (const t of types) {
+    result[t] = { total: 0, available: 0, rented: 0, maintenance: 0 };
+  }
+  for (const row of rows) {
+    const t = row.consoleType;
+    if (!result[t]) continue;
+    const n = row._count._all;
+    result[t].total += n;
+    if (row.status === "AVAILABLE") result[t].available += n;
+    else if (row.status === "RENTED") result[t].rented += n;
+    else if (row.status === "MAINTENANCE") result[t].maintenance += n;
+  }
+  return result;
+}
+
+/**
+ * @param {"today"|"week"|"month"|"all"} period
+ */
+async function getAnalyticsDashboard(period = PERIODS.today) {
+  const safePeriod = PERIODS[period] ? period : PERIODS.today;
+  const now = new Date();
+  const range = periodRange(safePeriod, now);
+  const periodWhere = createdAtFilter(range);
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+  const weekStart = daysAgo(7, now);
+  const monthStart = startOfMonth(now);
+  const todayWhere = { createdAt: { gte: todayStart, lte: todayEnd } };
+
+  const [
+    periodOrders,
+    periodActive,
+    periodCompleted,
+    periodCancelled,
+    periodRejected,
+    periodRevenue,
+    periodPromoDiscount,
+
+    totalUsers,
+    activeUsers,
+    newUsersPeriod,
+    totalOrders,
+    activeRentals,
+    inventoryRows,
+
+    revenueToday,
+    revenueWeek,
+    revenueMonth,
+    revenueAll,
+    promoDiscountAll,
+    deliveryToday,
+    deliveryWeek,
+    deliveryMonth,
+    deliveryAll,
+
+    couriers,
+    courierDelivered,
+    courierActive,
+    courierToday,
+  ] = await Promise.all([
+    prisma.order.count({ where: periodWhere }),
+    prisma.order.count({
+      where: { ...periodWhere, status: { in: ACTIVE_RENTAL_STATUSES } },
+    }),
+    prisma.order.count({
+      where: { ...periodWhere, status: { in: ["COMPLETED", "RETURNED"] } },
+    }),
+    prisma.order.count({
+      where: { ...periodWhere, status: { in: ["CANCELLED", "EXPIRED"] } },
+    }),
+    prisma.order.count({ where: { ...periodWhere, status: "REJECTED" } }),
+    sumOrderMoney(periodWhere),
+    sumPromoDiscounts(periodWhere),
+
+    prisma.user.count(),
+    prisma.user.count({
+      where: { lastActivityAt: { gte: daysAgo(30, now) } },
+    }),
+    prisma.user.count({ where: periodWhere.createdAt ? { createdAt: periodWhere.createdAt } : {} }),
+    prisma.order.count(),
+    prisma.order.count({ where: { status: { in: ACTIVE_RENTAL_STATUSES } } }),
+    prisma.inventoryItem.groupBy({
+      by: ["consoleType", "status"],
+      where: { itemType: "CONSOLE", consoleType: { not: null } },
+      _count: { _all: true },
+    }),
+
+    sumOrderMoney(todayWhere),
+    sumOrderMoney({ createdAt: { gte: weekStart } }),
+    sumOrderMoney({ createdAt: { gte: monthStart } }),
+    sumOrderMoney({}),
+    sumPromoDiscounts({}),
+    prisma.order.aggregate({
+      where: { ...todayWhere, status: { in: REVENUE_STATUSES } },
+      _sum: { deliveryFee: true },
+    }),
+    prisma.order.aggregate({
+      where: { createdAt: { gte: weekStart }, status: { in: REVENUE_STATUSES } },
+      _sum: { deliveryFee: true },
+    }),
+    prisma.order.aggregate({
+      where: { createdAt: { gte: monthStart }, status: { in: REVENUE_STATUSES } },
+      _sum: { deliveryFee: true },
+    }),
+    prisma.order.aggregate({
+      where: { status: { in: REVENUE_STATUSES } },
+      _sum: { deliveryFee: true },
+    }),
+
+    prisma.courier.findMany({
+      where: { isActive: true },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: "asc" },
+      take: 20,
+    }),
+    prisma.order.groupBy({
+      by: ["courierId"],
+      where: {
+        courierId: { not: null },
+        status: { in: ["DELIVERED", "ACTIVE", "RETURN_REQUESTED", "RETURNED", "COMPLETED"] },
+      },
+      _count: { _all: true },
+    }),
+    prisma.order.groupBy({
+      by: ["courierId"],
+      where: { courierId: { not: null }, status: { in: ACTIVE_RENTAL_STATUSES } },
+      _count: { _all: true },
+    }),
+    prisma.order.groupBy({
+      by: ["courierId"],
+      where: {
+        courierId: { not: null },
+        OR: [
+          { deliveryCompletedAt: { gte: todayStart, lte: todayEnd } },
+          {
+            deliveryCompletedAt: null,
+            status: { in: ["DELIVERED", "ACTIVE", "RETURNED", "COMPLETED"] },
+            updatedAt: { gte: todayStart, lte: todayEnd },
+          },
+        ],
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const inventory = pivotInventory(inventoryRows);
+  const invTotals = Object.values(inventory).reduce(
+    (acc, row) => {
+      acc.total += row.total;
+      acc.available += row.available;
+      acc.rented += row.rented;
+      acc.maintenance += row.maintenance;
+      return acc;
+    },
+    { total: 0, available: 0, rented: 0, maintenance: 0 }
+  );
+
+  const deliveredMap = Object.fromEntries(
+    courierDelivered.filter((r) => r.courierId).map((r) => [r.courierId, r._count._all])
+  );
+  const activeMap = Object.fromEntries(
+    courierActive.filter((r) => r.courierId).map((r) => [r.courierId, r._count._all])
+  );
+  const todayMap = Object.fromEntries(
+    courierToday.filter((r) => r.courierId).map((r) => [r.courierId, r._count._all])
+  );
+
+  const courierStats = couriers.map((c) => ({
+    id: c.id,
+    name: c.fullName || `Kuryer #${c.id}`,
+    delivered: deliveredMap[c.id] || 0,
+    active: activeMap[c.id] || 0,
+    today: todayMap[c.id] || 0,
+  }));
+
+  return {
+    period: safePeriod,
+    periodLabel: range.label,
+    generatedAt: now,
+    periodStats: {
+      orders: periodOrders,
+      active: periodActive,
+      completed: periodCompleted,
+      cancelled: periodCancelled,
+      rejected: periodRejected,
+      revenue: periodRevenue.total,
+    },
+    overview: {
+      totalUsers,
+      activeUsers,
+      newUsers: newUsersPeriod,
+      totalOrders,
+      activeRentals,
+      freeConsoles: invTotals.available,
+      rentedConsoles: invTotals.rented,
+      maintenanceConsoles: invTotals.maintenance,
+    },
+    finance: {
+      today: revenueToday.total,
+      week: revenueWeek.total,
+      month: revenueMonth.total,
+      total: revenueAll.total,
+      promoDiscounts: promoDiscountAll,
+      periodPromoDiscounts: periodPromoDiscount,
+      delivery: {
+        today: Number(deliveryToday._sum.deliveryFee ?? 0),
+        week: Number(deliveryWeek._sum.deliveryFee ?? 0),
+        month: Number(deliveryMonth._sum.deliveryFee ?? 0),
+        total: Number(deliveryAll._sum.deliveryFee ?? 0),
+      },
+    },
+    inventory,
+    couriers: courierStats,
+  };
+}
+
+function formatAnalyticsHtml(data) {
+  const p = data.periodStats;
+  const o = data.overview;
+  const f = data.finance;
   const lines = [
-    "📈 *Analytics Dashboard*",
+    `📈 <b>Analytics</b> · ${escapeHtml(data.periodLabel)}`,
+    `<i>${escapeHtml(formatDatetime(data.generatedAt))}</i>`,
     "",
-    "👥 *Foydalanuvchilar*",
-    `Jami: ${u.total} | Bugun: +${u.today} | Hafta: +${u.week} | Oy: +${u.month}`,
+    "📈 <b>Davr statistikasi</b>",
+    `• Buyurtmalar: <b>${p.orders}</b>`,
+    `• Faol ijaralar: <b>${p.active}</b>`,
+    `• Tugallangan: <b>${p.completed}</b>`,
+    `• Bekor qilingan: <b>${p.cancelled}</b>`,
+    `• Rad etilgan: <b>${p.rejected}</b>`,
+    `• Daromad: <b>${formatMoney(p.revenue)}</b>`,
     "",
-    "📦 *Buyurtmalar*",
-    `Jami: ${o.total} | Bugun: ${o.today} | Hafta: ${o.week} | Oy: ${o.month}`,
-    `Bajarilgan: ${o.completed} | Bekor: ${o.cancelled} (${o.cancelRate}%) | Kutilmoqda: ${o.pending}`,
+    "━━━━━━━━━━━━━━",
     "",
-    "💰 *Daromad*",
-    `Bugun: ${formatMoney(r.today)} | Hafta: ${formatMoney(r.week)}`,
-    `Oy: ${formatMoney(r.month)} | Jami: ${formatMoney(r.total)}`,
-    `O'rtacha buyurtma: ${formatMoney(r.avgOrder)}`,
+    "📊 <b>Umumiy statistika</b>",
+    `• Jami foydalanuvchilar: <b>${o.totalUsers}</b>`,
+    `• Faol foydalanuvchilar (30 kun): <b>${o.activeUsers}</b>`,
+    `• Yangi foydalanuvchilar (davr): <b>${o.newUsers}</b>`,
+    `• Jami buyurtmalar: <b>${o.totalOrders}</b>`,
+    `• Faol ijaralar: <b>${o.activeRentals}</b>`,
+    `• Bo'sh konsollar: <b>${o.freeConsoles}</b>`,
+    `• Band konsollar: <b>${o.rentedConsoles}</b>`,
+    `• Ta'mirdagi konsollar: <b>${o.maintenanceConsoles}</b>`,
     "",
-    "🏆 *Top*",
-    `PlayStation: ${data.top.console}`,
-    `Ijara muddati: ${data.top.duration}`,
-    `Kuryer: ${data.top.courier}`,
-    `Qaytib keluvchi mijozlar: ${data.returningCustomers}`,
+    "━━━━━━━━━━━━━━",
     "",
-    "🏷 *Promo statistika*",
+    "💰 <b>Moliyaviy hisobot</b>",
+    `• Bugungi: <b>${formatMoney(f.today)}</b>`,
+    `• Haftalik: <b>${formatMoney(f.week)}</b>`,
+    `• Oylik: <b>${formatMoney(f.month)}</b>`,
+    `• Umumiy: <b>${formatMoney(f.total)}</b>`,
+    `• Promo chegirmalari: <b>${formatMoney(f.promoDiscounts)}</b>`,
+    `• Yetkazib berish (jami): <b>${formatMoney(f.delivery.total)}</b>`,
+    `  Bugun ${formatMoney(f.delivery.today)} · Hafta ${formatMoney(f.delivery.week)} · Oy ${formatMoney(f.delivery.month)}`,
+    "",
+    "━━━━━━━━━━━━━━",
+    "",
+    "🎮 <b>Inventar (Console)</b>",
   ];
 
-  if (!data.promoStats.length) lines.push("Promo yo'q.");
-  else data.promoStats.forEach((p) => lines.push(`• ${p.code}: ${p.usedCount}/${p.usageLimit} ${p.isActive ? "" : "(o'chirilgan)"}`));
+  for (const type of ["PS3", "PS4", "PS5"]) {
+    const row = data.inventory[type] || { total: 0, available: 0, rented: 0, maintenance: 0 };
+    lines.push(
+      `<b>${type}</b> — jami ${row.total} | bo'sh ${row.available} | band ${row.rented} | ta'mir ${row.maintenance}`
+    );
+  }
 
-  lines.push("", "*Daromad grafigi (7 kun)*");
-  const maxR = Math.max(...data.dailyRevenue.map((d) => d.value), 1);
-  data.dailyRevenue.forEach((d) => lines.push(`${d.label}: ${bar(d.value, maxR)} ${formatMoney(d.value)}`));
-
-  lines.push("", "*Buyurtmalar grafigi (7 kun)*");
-  const maxO = Math.max(...data.dailyOrders.map((d) => d.value), 1);
-  data.dailyOrders.forEach((d) => lines.push(`${d.label}: ${bar(d.value, maxO)} ${d.value} ta`));
+  lines.push("", "━━━━━━━━━━━━━━", "", "🚚 <b>Kuryerlar</b>");
+  if (!data.couriers.length) {
+    lines.push("Faol kuryer yo'q.");
+  } else {
+    for (const c of data.couriers) {
+      lines.push(
+        `• <b>${escapeHtml(c.name)}</b> — yetkazilgan ${c.delivered} | faol ${c.active} | bugun ${c.today}`
+      );
+    }
+  }
 
   return lines.join("\n");
 }
 
-async function getAnalyticsReport() {
-  return getFullAnalytics();
+/** @deprecated alias — eski API */
+async function getFullAnalytics() {
+  return getAnalyticsDashboard(PERIODS.all);
+}
+
+async function getAnalyticsReport(period = PERIODS.today) {
+  return getAnalyticsDashboard(period);
+}
+
+function formatAnalytics(data) {
+  return formatAnalyticsHtml(data);
 }
 
 module.exports = {
-  ALLOWED_RENTAL_HOURS,
+  PERIODS,
+  PERIOD_LABELS,
+  getAnalyticsDashboard,
   getFullAnalytics,
   getAnalyticsReport,
   formatAnalytics,
+  formatAnalyticsHtml,
 };

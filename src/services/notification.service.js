@@ -28,12 +28,30 @@ async function sendToTelegram(telegramId, text, options = {}) {
   }
 }
 
+const KNOWN_NOTIFICATION_TYPES = new Set([
+  "ORDER_CREATED",
+  "ORDER_ACCEPTED",
+  "ORDER_REJECTED",
+  "COURIER_ON_WAY",
+  "ORDER_DELIVERED",
+  "RETURN_REMINDER",
+  "ORDER_RETURNED",
+  "ORDER_COMPLETED",
+  "ORDER_CANCELLED",
+  "COURIER_ASSIGNED",
+  "ORDER_ARRIVED",
+  "ADMIN_ORDER_ASSIGNED",
+  "PROMO",
+  "ADVERTISEMENT",
+]);
+
 async function persistNotification({ orderId, type, recipientType, recipientId, isSent }) {
+  const safeType = KNOWN_NOTIFICATION_TYPES.has(type) ? type : "ORDER_CREATED";
   try {
     await prisma.notification.create({
       data: {
         orderId,
-        type,
+        type: safeType,
         recipientType,
         recipientId: Number(recipientId) || 0,
         isSent,
@@ -44,6 +62,7 @@ async function persistNotification({ orderId, type, recipientType, recipientId, 
     logger.warn("Notification audit yozilmadi", {
       context: "NotificationService",
       error: err.message,
+      type: safeType,
       recipientType,
       recipientId,
     });

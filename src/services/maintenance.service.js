@@ -34,6 +34,7 @@ async function assertCanCreateOrder(isAdmin = false) {
   if (on && !isAdmin) {
     const err = new Error("🚧 Texnik ishlar olib borilmoqda. Yangi buyurtma vaqtincha qabul qilinmaydi.");
     err.code = "MAINTENANCE_MODE";
+    err.messageKey = "maintenance.blocked";
     throw err;
   }
 }

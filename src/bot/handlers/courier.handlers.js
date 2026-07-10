@@ -3,13 +3,70 @@ const playstationService = require("../../services/playstation.service");
 const orderService = require("../../services/order.service");
 const orderAssignmentService = require("../../services/orderAssignment.service");
 const orderNotificationService = require("../../services/orderNotification.service");
+const deliveryHandoverService = require("../../services/deliveryHandover.service");
 const courierKeyboards = require("../keyboards/courier.keyboards");
 const sessionStore = require("../sessionStore");
 const logger = require("../../utils/logger");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const { OrderAssignmentError } = require("../../errors/order.errors");
+const handoverWizard = require("../scenes/handoverWizard");
+const returnWizard = require("../scenes/returnWizard");
+const { addCallbackHandler } = require("../events/callbackRouter");
 
 const CONSOLE_TYPES = ["PS3", "PS4", "PS5"];
+
+async function clearInlineKeyboard(bot, query) {
+  try {
+    await bot.editMessageReplyMarkup(
+      { inline_keyboard: [] },
+      { chat_id: query.message.chat.id, message_id: query.message.message_id }
+    );
+  } catch (_) {}
+}
+
+/** photo + message ikkalasi emit bo'lishi mumkin — bir xil message_id ni bir marta ishlaymiz */
+const seenPhotoMessageIds = new Map();
+
+async function handleCourierPhoto(bot, msg) {
+  try {
+    const mid = msg.message_id;
+    const chatId = msg.chat?.id;
+    if (mid != null && chatId != null) {
+      const key = `${chatId}:${mid}`;
+      if (seenPhotoMessageIds.has(key)) return true;
+      seenPhotoMessageIds.set(key, Date.now());
+      // eski yozuvlarni tozalash
+      if (seenPhotoMessageIds.size > 200) {
+        const cutoff = Date.now() - 60_000;
+        for (const [k, ts] of seenPhotoMessageIds) {
+          if (ts < cutoff) seenPhotoMessageIds.delete(k);
+        }
+      }
+    }
+
+    const courier = await courierService.getCourierByTelegramId(msg.from.id);
+    if (!courier) return false;
+
+    if (await handoverWizard.handlePhotoMessage(bot, msg, courier)) return true;
+    if (await returnWizard.handlePhotoMessage(bot, msg, courier)) return true;
+
+    const session = sessionStore.getSession(msg.chat.id);
+    if (String(session.step || "").startsWith("hw:") || String(session.step || "").startsWith("ret:")) {
+      await bot.sendMessage(
+        msg.chat.id,
+        "❗️ Hozir rasm kutilmayapti. Wizard bosqichini tugating yoki qaytadan boshlang."
+      );
+      return true;
+    }
+    return false;
+  } catch (err) {
+    logger.error("Courier photo handler", { error: err.message, stack: err.stack });
+    try {
+      await bot.sendMessage(msg.chat.id, `❗️ Rasm qabul qilinmadi: ${err.message}`);
+    } catch (_) {}
+    return true;
+  }
+}
 
 function register(bot) {
   bot.onText(/\/courier/, async (msg) => {
@@ -45,14 +102,46 @@ function register(bot) {
     await bot.sendMessage(chatId, `Qaysi konsol turini qo'shmoqchisiz? (${CONSOLE_TYPES.join(" / ")})`);
   });
 
+  bot.on("photo", async (msg) => {
+    // Backup: ba'zi muhitlarda faqat photo event ishonchli
+    await handleCourierPhoto(bot, msg);
+  });
+
   bot.on("message", async (msg) => {
-    if (!msg.text || msg.text.startsWith("/")) return;
     const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    const text = msg.text.trim();
+    const telegramId = msg.from?.id;
+    if (!telegramId) return;
+
+    // Asosiy photo yo'li — message har doim emit bo'ladi
+    if (msg.photo) {
+      await handleCourierPhoto(bot, msg);
+      return;
+    }
+
     const session = sessionStore.getSession(chatId);
-    const courier = await courierService.getCourierByTelegramId(telegramId);
+    const courier = await courierService.getCourierByTelegramId(telegramId).catch(() => null);
+
+    // Topshirish/qaytarish PHOTO bosqichida non-photo → rad etish
+    if (
+      courier &&
+      (session.step === handoverWizard.STEPS.PHOTO || session.step === returnWizard.STEPS.PHOTO)
+    ) {
+      await bot.sendMessage(chatId, "❌ Iltimos faqat rasm yuboring.");
+      return;
+    }
+
+    if (!msg.text || msg.text.startsWith("/")) {
+      // /skip for return note
+      if (msg.text && /^\/skip\b/i.test(msg.text.trim())) {
+        if (courier && (await returnWizard.handleTextMessage(bot, msg, courier))) return;
+      }
+      return;
+    }
+
+    const text = msg.text.trim();
     if (!courier) return;
+
+    if (await returnWizard.handleTextMessage(bot, msg, courier)) return;
 
     if (session.step === "courier:profile:phone") {
       sessionStore.updateData(chatId, { _phone: text });
@@ -98,6 +187,9 @@ function register(bot) {
       return;
     }
 
+    // Admin inventar qo'shish wizard (courier emas) — skip
+    if (String(session.step || "").startsWith("admin:invitem:")) return;
+
     const dashboard = await orderAssignmentService.listCourierDashboard(courier.id);
 
     if (text === "📦 Buyurtmalar") {
@@ -119,9 +211,11 @@ function register(bot) {
         return;
       }
       for (const o of dashboard.acceptedOrders.slice(0, 10)) {
-        await bot.sendMessage(chatId, `#${o.id} — ${o.consoleType} — ${o.status}`, {
-          ...courierKeyboards.assignedOrderKeyboard(o.id),
-        });
+        let kb = courierKeyboards.assignedOrderKeyboard(o.id);
+        if (o.status === "ON_THE_WAY") kb = courierKeyboards.onTheWayKeyboard(o.id);
+        else if (o.status === "ARRIVED") kb = courierKeyboards.arrivedKeyboard(o.id);
+        else if (["DELIVERED", "ACTIVE"].includes(o.status)) kb = courierKeyboards.deliveredKeyboard(o.id);
+        await bot.sendMessage(chatId, `#${o.id} — ${o.consoleType} — ${o.status}`, kb);
       }
       return;
     }
@@ -137,8 +231,6 @@ function register(bot) {
         `👤 *Profil*\n\nIsm: ${courier.fullName || "—"}\nTelefon: ${courier.phone || "—"}\nHudud: ${courier.region || "—"}`,
         { parse_mode: "Markdown" }
       );
-      sessionStore.setStep(chatId, "courier:profile:phone");
-      await bot.sendMessage(chatId, "Telefon raqamini yangilash uchun yozing yoki /profile buyrug'ini ishlating.");
       return;
     }
     if (text === "⚙️ Sozlamalar") {
@@ -159,12 +251,13 @@ function register(bot) {
     await bot.sendMessage(msg.chat.id, "✅ Lokatsiya yangilandi.");
   });
 
-  bot.on("callback_query", async (query) => {
+  addCallbackHandler("courier", async (bot, query) => {
     const data = query.data;
-    if (!data.startsWith("courier:")) return;
+    if (!data?.startsWith("courier:")) return false;
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
     if (data.startsWith("courier:settings:")) {
       const sub = data.split(":")[2];
       if (sub === "profile") {
@@ -179,25 +272,40 @@ function register(bot) {
         });
       }
       await safeAnswerCallbackQuery(bot, query.id);
-      return;
+      return true;
     }
-
-    const [, action, orderIdRaw] = data.split(":");
-    const orderId = Number(orderIdRaw);
 
     try {
       const courier = await courierService.getCourierByTelegramId(telegramId);
       if (!courier || !courier.isActive) {
         await safeAnswerCallbackQuery(bot, query.id, { text: "Kuryer faol emas." });
-        return;
+        return true;
       }
+
+      if (data.startsWith("courier:hw:") || data.startsWith("courier:handover:")) {
+        const handled = await handoverWizard.handleCallback(bot, query, courier, data);
+        if (handled) return true;
+      }
+
+      if (data.startsWith("courier:ret:")) {
+        const handled = await returnWizard.handleCallback(bot, query, courier, data);
+        if (handled) return true;
+      }
+
+      const [, action, orderIdRaw] = data.split(":");
+      const orderId = Number(orderIdRaw);
 
       if (action === "accept") {
         const order = await orderAssignmentService.acceptOrderByCourier(orderId, courier.id);
-        await bot.sendMessage(chatId, `✅ Buyurtma #${order.id} qabul qilindi.`, courierKeyboards.onTheWayKeyboard(order.id));
+        await bot.sendMessage(
+          chatId,
+          `✅ Buyurtma #${order.id} qabul qilindi.`,
+          courierKeyboards.onTheWayKeyboard(order.id)
+        );
       } else if (action === "reject") {
         await orderAssignmentService.rejectOrderByCourier(orderId, courier.id);
-        await bot.sendMessage(chatId, `❌ Buyurtma #${orderId} rad etildi.`);
+        await bot.sendMessage(chatId, `❌ Buyurtma #${orderId} rad etildi. Mijoz va admin xabardor qilindi.`);
+        await clearInlineKeyboard(bot, query);
       } else if (action === "location") {
         const order = await orderService.getOrderById(orderId);
         if (order?.latitude != null && order?.longitude != null) {
@@ -207,17 +315,41 @@ function register(bot) {
         }
       } else if (action === "onway") {
         await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "ON_THE_WAY");
-        await bot.sendMessage(chatId, `🚗 Yo'ldasiz (#${orderId})`, courierKeyboards.arrivedKeyboard(orderId));
+        await deliveryHandoverService.notifyAdminStep(orderId, "Buyurtma yo'lga chiqdi");
+        await bot.sendMessage(chatId, `🚗 Yo'ldasiz (#${orderId})`, courierKeyboards.onTheWayKeyboard(orderId));
       } else if (action === "arrived") {
-        await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "ARRIVED");
-        await bot.sendMessage(chatId, `📍 Yetib keldingiz (#${orderId})`, courierKeyboards.deliveredKeyboard(orderId));
+        const current = await orderService.getOrderById(orderId);
+        if (current?.paymentReceived || ["DELIVERED", "ACTIVE"].includes(current?.status)) {
+          await bot.sendMessage(
+            chatId,
+            `📦 Buyurtma #${orderId} allaqachon faol ijara holatida.`,
+            courierKeyboards.deliveredKeyboard(orderId)
+          );
+        } else {
+          if (current?.status !== "ARRIVED") {
+            await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "ARRIVED");
+          }
+          await handoverWizard.startHandoverWizard(bot, chatId, orderId);
+        }
       } else if (action === "delivered") {
-        await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "DELIVERED");
-        await bot.sendMessage(chatId, `📦 Yetkazildi (#${orderId})`, courierKeyboards.deliveredKeyboard(orderId));
+        const current = await orderService.getOrderById(orderId);
+        if (current?.paymentReceived || ["DELIVERED", "ACTIVE"].includes(current?.status)) {
+          await bot.sendMessage(
+            chatId,
+            `📦 Buyurtma #${orderId} allaqachon faol ijara.`,
+            courierKeyboards.deliveredKeyboard(orderId)
+          );
+        } else {
+          await handoverWizard.startHandoverWizard(bot, chatId, orderId);
+        }
       } else if (action === "returned") {
-        await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "RETURNED");
-        await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "COMPLETED");
-        await bot.sendMessage(chatId, `✅ Buyurtma #${orderId} yakunlandi.`);
+        const started = await returnWizard.startReturnWizard(bot, chatId, orderId);
+        if (started === false) {
+          // Legacy orders without inventory links
+          await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "RETURNED");
+          await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "COMPLETED");
+          await bot.sendMessage(chatId, `✅ Buyurtma #${orderId} yakunlandi (legacy).`);
+        }
       } else if (action === "cancel") {
         await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "CANCELLED");
         await bot.sendMessage(chatId, `❌ Buyurtma #${orderId} bekor qilindi.`);
@@ -229,6 +361,7 @@ function register(bot) {
       logger.error("Kuryer callback xatoligi", { context: "Bot", error: err.message });
       await safeAnswerCallbackQuery(bot, query.id, { text: msg });
     }
+    return true;
   });
 }
 

@@ -1,8 +1,16 @@
 const customerCrmService = require("../../services/customerCrm.service");
+const supportChatService = require("../../services/supportChat.service");
 const sessionStore = require("../sessionStore");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const { CustomerRating } = require("../../constants/customerRating");
+const { STEPS } = require("../../constants/supportChat");
+const {
+  customerActionsKeyboard,
+  crmProfileActionsKeyboard,
+  cancelComposeKeyboard,
+} = require("../keyboards/support.keyboards");
 const prisma = require("../../config/prisma");
+const { addCallbackHandler } = require("../events/callbackRouter");
 
 function crmListKeyboard(users) {
   const rows = users.map((u) => [
@@ -15,32 +23,14 @@ function crmListKeyboard(users) {
   return { reply_markup: { inline_keyboard: rows } };
 }
 
-function crmProfileKeyboard(userId) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "📜 Tarix", callback_data: `admin:crm:history:${userId}` },
-          { text: "📝 Izoh", callback_data: `admin:crm:notes:${userId}` },
-        ],
-        [
-          { text: "⭐ Ishonchli", callback_data: `admin:crm:rate:${userId}:TRUSTED` },
-          { text: "👤 Oddiy", callback_data: `admin:crm:rate:${userId}:NORMAL` },
-        ],
-        [{ text: "⚠️ Xavfli", callback_data: `admin:crm:rate:${userId}:RISKY` }],
-      ],
-    },
-  };
-}
-
 function registerAdminCrmHandlers(bot, isAdmin) {
-  bot.on("callback_query", async (query) => {
-    if (!query.data.startsWith("admin:crm:")) return;
+  addCallbackHandler("admin-crm", async (bot, query) => {
+    if (!query.data?.startsWith("admin:crm:")) return false;
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
     if (!(await isAdmin(telegramId))) {
       await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
-      return;
+      return true;
     }
 
     const parts = query.data.split(":");
@@ -52,7 +42,29 @@ function registerAdminCrmHandlers(bot, isAdmin) {
       if (action === "search") {
         sessionStore.setStep(chatId, "admin:crm:search");
         await bot.sendMessage(chatId, "Mijoz ismi, telefon yoki username kiriting:");
+      } else if (action === "back") {
+        const users = await customerCrmService.listCustomers({});
+        await bot.sendMessage(chatId, "👥 *Mijozlar CRM*", {
+          parse_mode: "Markdown",
+          ...crmListKeyboard(users),
+        });
       } else if (action === "view") {
+        const userId = Number(parts[3]);
+        if (!Number.isFinite(userId) || userId <= 0) {
+          await bot.sendMessage(chatId, "Noto'g'ri mijoz.");
+        } else {
+          const profile = await customerCrmService.getCustomerProfile(userId);
+          if (!profile) {
+            await bot.sendMessage(chatId, "Mijoz topilmadi.");
+          } else {
+            const name = profile.user.fullName || profile.user.phone || profile.user.telegramId;
+            await bot.sendMessage(chatId, `👤 *${name}*\n\nQuyidagi amallardan birini tanlang:`, {
+              parse_mode: "Markdown",
+              ...customerActionsKeyboard(userId),
+            });
+          }
+        }
+      } else if (action === "profile") {
         const userId = Number(parts[3]);
         const profile = await customerCrmService.getCustomerProfile(userId);
         if (!profile) {
@@ -60,15 +72,41 @@ function registerAdminCrmHandlers(bot, isAdmin) {
         } else {
           await bot.sendMessage(chatId, customerCrmService.formatProfile(profile), {
             parse_mode: "Markdown",
-            ...crmProfileKeyboard(userId),
+            ...crmProfileActionsKeyboard(userId),
           });
         }
-      } else if (action === "history") {
+      } else if (action === "orders" || action === "history") {
         const userId = Number(parts[3]);
         const profile = await customerCrmService.getCustomerProfile(userId);
-        await bot.sendMessage(chatId, customerCrmService.formatOrderHistory(profile.user), {
+        if (!profile) {
+          await bot.sendMessage(chatId, "Mijoz topilmadi.");
+        } else {
+          await bot.sendMessage(chatId, customerCrmService.formatOrderHistory(profile.user), {
+            parse_mode: "Markdown",
+            ...customerActionsKeyboard(userId),
+          });
+        }
+      } else if (action === "chathistory") {
+        const userId = Number(parts[3]);
+        const { text } = await supportChatService.getChatHistory(userId, { take: 25 });
+        await bot.sendMessage(chatId, text, {
           parse_mode: "Markdown",
+          ...customerActionsKeyboard(userId),
         });
+      } else if (action === "msg") {
+        const userId = Number(parts[3]);
+        if (!Number.isFinite(userId) || userId <= 0) {
+          await bot.sendMessage(chatId, "Noto'g'ri mijoz.");
+        } else {
+          sessionStore.setStep(chatId, STEPS.ADMIN_COMPOSE);
+          sessionStore.updateData(chatId, { _supportUserId: userId });
+          await bot.sendMessage(
+            chatId,
+            "Mijozga yubormoqchi bo'lgan xabaringizni yuboring.\n\n" +
+              "Matn, rasm, video, ovoz, fayl va boshqalar qabul qilinadi.",
+            cancelComposeKeyboard()
+          );
+        }
       } else if (action === "notes") {
         const userId = Number(parts[3]);
         sessionStore.setStep(chatId, "admin:crm:notes");
@@ -85,6 +123,7 @@ function registerAdminCrmHandlers(bot, isAdmin) {
     } catch (err) {
       await safeAnswerCallbackQuery(bot, query.id, { text: err.message });
     }
+    return true;
   });
 }
 
@@ -103,7 +142,7 @@ async function handleCrmAdminMessage(bot, chatId, msg, session) {
     return true;
   }
   if (session.step === "admin:crm:notes") {
-    const adminRecord = await require("../../config/prisma").admin.findUnique({
+    const adminRecord = await prisma.admin.findUnique({
       where: { telegramId: BigInt(msg.from.id) },
     });
     await customerCrmService.setNotes(session.data._crmUserId, msg.text.trim(), {

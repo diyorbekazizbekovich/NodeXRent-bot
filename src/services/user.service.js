@@ -37,6 +37,13 @@ async function updateLocation(telegramId, { address, latitude, longitude }) {
   });
 }
 
+async function updateLanguage(telegramId, language) {
+  return prisma.user.update({
+    where: { telegramId: BigInt(telegramId) },
+    data: { language },
+  });
+}
+
 async function isRegistrationComplete(user) {
   return Boolean(user && user.phone && (user.defaultAddress || (user.latitude && user.longitude)));
 }
@@ -58,6 +65,7 @@ module.exports = {
   getUserByTelegramId,
   updatePhone,
   updateLocation,
+  updateLanguage,
   isRegistrationComplete,
   blockUser,
   listUsers,

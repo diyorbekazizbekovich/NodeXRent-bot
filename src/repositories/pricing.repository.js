@@ -91,6 +91,31 @@ async function deleteRentalPrice(id) {
   return prisma.rentalPrice.delete({ where: { id } });
 }
 
+async function deleteConsole(id) {
+  return prisma.consoleCatalog.delete({ where: { id } });
+}
+
+async function countOrdersByConsoleCode(code) {
+  return prisma.order.count({ where: { consoleType: code } });
+}
+
+async function countActiveOrdersByConsoleCode(code) {
+  return prisma.order.count({
+    where: {
+      consoleType: code,
+      status: {
+        notIn: ["CANCELLED", "COMPLETED", "EXPIRED", "REJECTED"],
+      },
+    },
+  });
+}
+
+async function countRentalPricesReferencingConsole(consoleCatalogId) {
+  return prisma.order.count({
+    where: { rentalPrice: { consoleCatalogId } },
+  });
+}
+
 module.exports = {
   findActiveConsoles,
   findAllConsoles,
@@ -105,4 +130,8 @@ module.exports = {
   createRentalPrice,
   updateRentalPrice,
   deleteRentalPrice,
+  deleteConsole,
+  countOrdersByConsoleCode,
+  countActiveOrdersByConsoleCode,
+  countRentalPricesReferencingConsole,
 };

@@ -1,19 +1,42 @@
 const telegramBotApi = require("node-telegram-bot-api");
-// v1.x named/default export; v0.x direct constructor export
 const TelegramBot = telegramBotApi.default || telegramBotApi.TelegramBot || telegramBotApi;
 const env = require("../config/env");
 const logger = require("../utils/logger");
 const { initNotificationService } = require("../services/notification.service");
+const { applyRateLimitMiddleware } = require("./middleware/rateLimit.middleware");
+const { registerUnknownMessageHandler } = require("./middleware/unknownMessage.middleware");
+const { registerCallbackRouter, listCallbackHandlers } = require("./events/callbackRouter");
+const { setupPollingResilience } = require("./events/polling");
+const { getRegistrationSnapshot } = require("./events/registry");
 
 const userHandlers = require("./handlers/user.handlers");
 const courierHandlers = require("./handlers/courier.handlers");
 const adminHandlers = require("./handlers/admin.handlers");
 
+/** @type {import("node-telegram-bot-api")|null} */
+let botSingleton = null;
+
 function createBot() {
+  if (botSingleton) {
+    logger.warn("createBot qayta chaqirildi — mavjud singleton qaytarildi", { context: "Bot" });
+    return botSingleton;
+  }
+
   const isWebhook = env.BOT_MODE === "webhook";
 
   const bot = new TelegramBot(env.BOT_TOKEN, {
-    polling: !isWebhook,
+    polling: isWebhook
+      ? false
+      : {
+          interval: 300,
+          autoStart: true,
+          params: { timeout: 10 },
+        },
+    request: {
+      // Tarmoq uzilishida uzoq osilib qolmasin
+      timeout: 30000,
+      agentOptions: { keepAlive: true, keepAliveMsecs: 10000 },
+    },
   });
 
   if (isWebhook && env.WEBHOOK_URL) {
@@ -22,28 +45,34 @@ function createBot() {
     });
   }
 
-  // Notification service'ga bot instance'ni beramiz (xabar yuborish uchun)
+  applyRateLimitMiddleware(bot);
   initNotificationService(bot);
 
-  // Har bir rol uchun handler'larni ro'yxatdan o'tkazamiz.
-  // MUHIM: courier va admin handlerlari o'zining shartlarini (isCourier/isAdmin) ichida
-  // tekshiradi, shuning uchun bir nechta "on message" listener bo'lishi muammo emas —
-  // har biri faqat o'ziga tegishli holatda amal bajaradi.
+  // Handlerlar callbacklarni queue ga qo'shadi (bot.on emas)
   userHandlers.register(bot);
   courierHandlers.register(bot);
   adminHandlers.register(bot);
 
-  bot.on("polling_error", (err) => {
-    logger.error("Polling xatoligi", { context: "Bot", error: err.message });
+  // Bitta markaziy callback_query listener
+  registerCallbackRouter(bot);
+
+  // Idle foydalanuvchi — oxirida
+  registerUnknownMessageHandler(bot);
+
+  setupPollingResilience(bot);
+
+  logger.info(`Bot ishga tushdi (${isWebhook ? "webhook" : "polling"} rejimida)`, {
+    context: "Bot",
+    callbackHandlers: listCallbackHandlers(),
+    listeners: getRegistrationSnapshot(),
   });
 
-  bot.on("webhook_error", (err) => {
-    logger.error("Webhook xatoligi", { context: "Bot", error: err.message });
-  });
-
-  logger.info(`Bot ishga tushdi (${isWebhook ? "webhook" : "polling"} rejimida)`, { context: "Bot" });
-
+  botSingleton = bot;
   return bot;
 }
 
-module.exports = { createBot };
+function getBot() {
+  return botSingleton;
+}
+
+module.exports = { createBot, getBot };

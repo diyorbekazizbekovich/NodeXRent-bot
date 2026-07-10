@@ -27,8 +27,23 @@ async function tryAssignCourier(orderId, courierId, playstationId, extra = {}) {
 }
 
 async function createStatusLog(orderId, status, { actorType, actorId, note } = {}) {
+  const INT32_MAX = 2147483647;
+  let safeActorId = actorId == null ? null : Number(actorId);
+  let safeNote = note || null;
+
+  if (safeActorId != null && (!Number.isFinite(safeActorId) || Math.abs(safeActorId) > INT32_MAX)) {
+    safeNote = [safeNote, `actorTelegramId=${actorId}`].filter(Boolean).join(" | ");
+    safeActorId = null;
+  }
+
   return prisma.orderStatusLog.create({
-    data: { orderId, status, actorType, actorId, note },
+    data: {
+      orderId,
+      status,
+      actorType: actorType || null,
+      actorId: safeActorId,
+      note: safeNote,
+    },
   });
 }
 
@@ -67,11 +82,18 @@ function orderIncludes() {
   return {
     user: true,
     courier: true,
+    deliveredByCourier: true,
     playstation: true,
     inventoryUnit: true,
+    consoleItem: true,
+    hdmiItem: true,
+    powerItem: true,
     payments: true,
     rentalPrice: { include: { consoleCatalog: true } },
-    payment: true,
+    promocode: true,
+    orderItems: { include: { inventoryItem: true } },
+    contract: true,
+    photos: true,
     statusLogs: { orderBy: { changedAt: "asc" } },
   };
 }

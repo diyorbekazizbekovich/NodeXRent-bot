@@ -56,7 +56,7 @@ async function getStats(courierId) {
     prisma.order.count({
       where: {
         courierId,
-        status: { in: ["COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED", "DELIVERED", "RETURN_REQUESTED"] },
+        status: { in: ["COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"] },
       },
     }),
     prisma.order.count({ where: { courierId, status: { in: ["COMPLETED", "RETURNED"] } } }),

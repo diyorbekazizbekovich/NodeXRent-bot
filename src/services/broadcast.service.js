@@ -144,38 +144,8 @@ async function saveCampaign(adminId, payload, stats) {
         failCount: stats.failed,
       },
     });
-    // #region agent log
-    fetch("http://127.0.0.1:7337/ingest/8db3dc57-5ac7-404c-9c2a-b6f7f97096d0", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b9b071" },
-      body: JSON.stringify({
-        sessionId: "b9b071",
-        runId: "post-fix",
-        hypothesisId: "H1",
-        location: "broadcast.service.js:saveCampaign",
-        message: "AdCampaign saved via Prisma",
-        data: { mediaType: payload.type, total: stats.total },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   } catch (err) {
     logger.warn("AdCampaign to'liq saqlanmadi, raw SQL fallback", { error: err.message });
-    // #region agent log
-    fetch("http://127.0.0.1:7337/ingest/8db3dc57-5ac7-404c-9c2a-b6f7f97096d0", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b9b071" },
-      body: JSON.stringify({
-        sessionId: "b9b071",
-        runId: "post-fix",
-        hypothesisId: "H1",
-        location: "broadcast.service.js:saveCampaign",
-        message: "Prisma create failed, using raw SQL",
-        data: { error: err.message },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     await prisma.$executeRaw`
       INSERT INTO playstation_rental.ad_campaigns ("adminId", message, "recipientCount", "sentAt")
       VALUES (${adminId}, ${message}, ${stats.success}, NOW())
@@ -190,22 +160,6 @@ async function broadcast(bot, msg, adminId, progressCallback) {
   let success = 0;
   let failed = 0;
 
-  // #region agent log
-  fetch("http://127.0.0.1:7337/ingest/8db3dc57-5ac7-404c-9c2a-b6f7f97096d0", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b9b071" },
-    body: JSON.stringify({
-      sessionId: "b9b071",
-      runId: "post-fix",
-      hypothesisId: "H2",
-      location: "broadcast.service.js:broadcast",
-      message: "Broadcast started",
-      data: { mediaType: payload.type, total, hasText: Boolean(payload.text), hasFileId: Boolean(payload.fileId) },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-
   if (total === 0) {
     return { total: 0, success: 0, failed: 0, mediaType: payload.type };
   }
@@ -218,23 +172,6 @@ async function broadcast(bot, msg, adminId, progressCallback) {
     } catch (err) {
       failed++;
       logger.warn("Broadcast xatoligi", { userId: u.id, error: err.message });
-      if (failed === 1) {
-        // #region agent log
-        fetch("http://127.0.0.1:7337/ingest/8db3dc57-5ac7-404c-9c2a-b6f7f97096d0", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b9b071" },
-          body: JSON.stringify({
-            sessionId: "b9b071",
-            runId: "post-fix",
-            hypothesisId: "H3",
-            location: "broadcast.service.js:broadcast",
-            message: "First send failure",
-            data: { mediaType: payload.type, error: err.message },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-      }
     }
 
     if (progressCallback && (i % 5 === 0 || i === users.length - 1)) {
@@ -246,22 +183,6 @@ async function broadcast(bot, msg, adminId, progressCallback) {
   }
 
   await saveCampaign(adminId, payload, { total, success, failed });
-
-  // #region agent log
-  fetch("http://127.0.0.1:7337/ingest/8db3dc57-5ac7-404c-9c2a-b6f7f97096d0", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b9b071" },
-    body: JSON.stringify({
-      sessionId: "b9b071",
-      runId: "post-fix",
-      hypothesisId: "H4",
-      location: "broadcast.service.js:broadcast",
-      message: "Broadcast completed",
-      data: { total, success, failed, mediaType: payload.type },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
 
   return { total, success, failed, mediaType: payload.type };
 }

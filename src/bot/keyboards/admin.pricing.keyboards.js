@@ -7,6 +7,7 @@ function pricingMenuKeyboard() {
         [{ text: "➕ Yangi muddat qo'shish", callback_data: "admin:pricing:add" }],
         [{ text: "🔛 Faol/nofaol", callback_data: "admin:pricing:toggle" }],
         [{ text: "🎮 Konsol turlari", callback_data: "admin:pricing:consoles" }],
+        [{ text: "⚙️ Konsol boshqaruvi", callback_data: "admin:pricing:manageConsoles" }],
         [{ text: "➕ Yangi konsol", callback_data: "admin:pricing:addConsole" }],
       ],
     },
@@ -39,4 +40,35 @@ function consoleSelectKeyboard(consoles, prefix = "admin:pricing:console") {
   };
 }
 
-module.exports = { pricingMenuKeyboard, rentalPriceSelectKeyboard, consoleSelectKeyboard };
+function consoleManageKeyboard(consoles) {
+  return {
+    reply_markup: {
+      inline_keyboard: consoles.map((c) => [
+        {
+          text: `${c.isActive ? "✅" : "🚫"} ${c.displayName} (${c.code})`,
+          callback_data: `admin:pricing:consoleManage:${c.id}`,
+        },
+      ]),
+    },
+  };
+}
+
+function consoleActionKeyboard(consoleId, isActive) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✏️ Nomini o'zgartirish", callback_data: `admin:pricing:consoleRename:${consoleId}` }],
+        [
+          {
+            text: isActive ? "🔴 Nofaol qilish" : "🟢 Faol qilish",
+            callback_data: `admin:pricing:consoleToggle:${consoleId}`,
+          },
+        ],
+        [{ text: "🗑 Butunlay o'chirish", callback_data: `admin:pricing:consoleDelete:${consoleId}` }],
+        [{ text: "⬅️ Orqaga", callback_data: "admin:pricing:manageConsoles" }],
+      ],
+    },
+  };
+}
+
+module.exports = { pricingMenuKeyboard, rentalPriceSelectKeyboard, consoleSelectKeyboard, consoleManageKeyboard, consoleActionKeyboard };

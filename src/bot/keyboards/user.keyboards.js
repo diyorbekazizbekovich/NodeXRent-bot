@@ -1,4 +1,5 @@
 const pricingService = require("../../services/pricing.service");
+const { t, resolveLang } = require("../../i18n");
 
 function durationIcon(hours) {
   if (hours === 24) return "🕒";
@@ -6,33 +7,36 @@ function durationIcon(hours) {
   return "⏱";
 }
 
-function mainMenuKeyboard() {
+function mainMenuKeyboard(lang) {
+  const L = resolveLang(lang);
   return {
     reply_markup: {
       keyboard: [
-        ["🎮 Buyurtma berish", "📋 Buyurtmalarim"],
-        ["⏳ Ijara uzaytirish", "📍 Manzilni o'zgartirish"],
-        ["ℹ️ Yordam"],
+        [t("menu.order", L), t("menu.myOrders", L)],
+        [t("menu.extend", L), t("menu.changeAddress", L)],
+        [t("menu.help", L), t("menu.language", L)],
       ],
       resize_keyboard: true,
     },
   };
 }
 
-function contactRequestKeyboard() {
+function contactRequestKeyboard(lang) {
+  const L = resolveLang(lang);
   return {
     reply_markup: {
-      keyboard: [[{ text: "📱 Telefon raqamni yuborish", request_contact: true }]],
+      keyboard: [[{ text: t("menu.sharePhone", L), request_contact: true }]],
       resize_keyboard: true,
       one_time_keyboard: true,
     },
   };
 }
 
-function locationRequestKeyboard() {
+function locationRequestKeyboard(lang) {
+  const L = resolveLang(lang);
   return {
     reply_markup: {
-      keyboard: [[{ text: "📍 Lokatsiyani yuborish", request_location: true }]],
+      keyboard: [[{ text: t("menu.shareLocation", L), request_location: true }]],
       resize_keyboard: true,
       one_time_keyboard: true,
     },
@@ -54,12 +58,13 @@ function consoleTypeKeyboard(consoles) {
 }
 
 /** Tanlangan konsol uchun ijara muddatlari — narxlar bazadan keladi */
-function rentalOptionsKeyboard(options) {
+function rentalOptionsKeyboard(options, lang) {
+  const L = resolveLang(lang);
   return {
     reply_markup: {
       inline_keyboard: options.map((o) => [
         {
-          text: `${durationIcon(o.duration)} ${pricingService.formatDurationLabel(o.duration)} — ${pricingService.formatMoney(o.price, o.currency)}`,
+          text: `${durationIcon(o.duration)} ${pricingService.formatDurationLabel(o.duration, L)} — ${pricingService.formatMoney(o.price, o.currency, L)}`,
           callback_data: `rental:${o.id}`,
         },
       ]),
@@ -67,41 +72,71 @@ function rentalOptionsKeyboard(options) {
   };
 }
 
-function quickDateKeyboard(options) {
+function quickDateKeyboard(options, lang) {
+  const L = resolveLang(lang);
   const buttons = options.map((o, i) => [{ text: o.label, callback_data: `date:${i}` }]);
-  buttons.push([{ text: "📅 Boshqa sana kiritish", callback_data: "date:manual" }]);
+  buttons.push([{ text: t("order.otherDate", L), callback_data: "date:manual" }]);
   return { reply_markup: { inline_keyboard: buttons } };
 }
 
-function timeKeyboard() {
-  const times = ["09:00", "12:00", "15:00", "18:00", "21:00"];
-  return {
-    reply_markup: {
-      inline_keyboard: [times.map((t) => ({ text: t, callback_data: `time:${t}` }))],
-    },
-  };
+function timeKeyboard(baseDate) {
+  const { getAvailableTimeSlots } = require("../../validators/orderDatetime.validator");
+  const times = getAvailableTimeSlots(baseDate);
+  if (times.length === 0) {
+    return null;
+  }
+
+  const rows = [];
+  for (let i = 0; i < times.length; i += 3) {
+    rows.push(
+      times.slice(i, i + 3).map((slot) => ({
+        text: slot,
+        callback_data: `time:${slot}`,
+      }))
+    );
+  }
+
+  return { reply_markup: { inline_keyboard: rows } };
 }
 
-function promocodeKeyboard() {
+function promocodeKeyboard(lang) {
+  const L = resolveLang(lang);
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "🏷️ Promo-kodim bor", callback_data: "promo:enter" }],
-        [{ text: "➡️ O'tkazib yuborish", callback_data: "promo:skip" }],
+        [{ text: t("order.promoHave", L), callback_data: "promo:enter" }],
+        [{ text: t("order.promoSkipBtn", L), callback_data: "promo:skip" }],
       ],
     },
   };
 }
 
-function confirmKeyboard() {
+function confirmKeyboard(disabled = false, lang) {
+  const L = resolveLang(lang);
+  if (disabled) {
+    return {
+      reply_markup: {
+        inline_keyboard: [[{ text: t("order.confirmedBtn", L), callback_data: "order:noop" }]],
+      },
+    };
+  }
   return {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅ Tasdiqlash", callback_data: "order:confirm" },
-          { text: "❌ Bekor qilish", callback_data: "order:cancel" },
+          { text: t("order.confirmBtn", L), callback_data: "order:confirm" },
+          { text: t("order.cancelBtn", L), callback_data: "order:cancel" },
         ],
       ],
+    },
+  };
+}
+
+function loadingConfirmKeyboard(lang) {
+  const L = resolveLang(lang);
+  return {
+    reply_markup: {
+      inline_keyboard: [[{ text: t("order.loadingBtn", L), callback_data: "order:noop" }]],
     },
   };
 }
@@ -129,5 +164,6 @@ module.exports = {
   timeKeyboard,
   promocodeKeyboard,
   confirmKeyboard,
+  loadingConfirmKeyboard,
   ratingKeyboard,
 };

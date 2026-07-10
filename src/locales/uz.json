@@ -1,0 +1,240 @@
+{
+  "lang": {
+    "choose": "🌐 Tilni tanlang / Выберите язык",
+    "changed": "✅ Til o'zgartirildi: O'zbekcha",
+    "uz": "🇺🇿 O'zbekcha",
+    "ru": "🇷🇺 Русский",
+    "menuBtn": "🌐 Til / Язык"
+  },
+  "welcome": {
+    "hello": "Assalomu alaykum, {{name}}! 👋\n\nPlayStation ijara botiga xush kelibsiz.\nDavom etish uchun telefon raqamingizni yuboring:",
+    "askLocation": "📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
+    "mainMenu": "🏠 Asosiy menyu:",
+    "phoneSaved": "✅ Telefon raqamingiz saqlandi.\n\n📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
+    "locationSaved": "✅ Manzilingiz saqlandi.\n\n🏠 Asosiy menyu:",
+    "needRegister": "Iltimos avval /start orqali ro'yxatdan o'ting.",
+    "userNotFound": "❗️ Foydalanuvchi topilmadi. /start buyrug'ini yuboring."
+  },
+  "menu": {
+    "order": "🎮 Buyurtma berish",
+    "myOrders": "📋 Buyurtmalarim",
+    "extend": "⏳ Ijara uzaytirish",
+    "changeAddress": "📍 Manzilni o'zgartirish",
+    "help": "ℹ️ Yordam",
+    "language": "🌐 Til / Язык",
+    "sharePhone": "📱 Telefon raqamni yuborish",
+    "shareLocation": "📍 Lokatsiyani yuborish"
+  },
+  "help": {
+    "text": "📞 *Qo'llab-quvvatlash*\n\n+998 50 024 7999"
+  },
+  "support": {
+    "askReply": "Iltimos, javobingizni yuboring.",
+    "sent": "✅ Javobingiz yuborildi. Tez orada javob beramiz.",
+    "sendFail": "❗️ Yuborilmadi: {{error}}",
+    "sendContent": "❗️ Matn yoki media yuboring.",
+    "needRegister": "Iltimos avval /start orqali ro'yxatdan o'ting.",
+    "forbidden": "❗️ Ruxsat yo'q.",
+    "invalid": "Noto'g'ri so'rov."
+  },
+  "unknown": {
+    "text": "❗ Siz noto'g'ri buyruq yubordingiz.\n\nBotdan foydalanish uchun:\n\n1️⃣ /start buyrug'ini bosing.\n\n2️⃣ Asosiy menyudan <b>\"🎮 Buyurtma berish\"</b> tugmasini tanlang.\n\n3️⃣ Bot sizni bosqichma-bosqich yo'naltiradi.\n\nIltimos, botga tasodifiy xabarlar yubormang."
+  },
+  "rateLimit": {
+    "blocked": "⚠️ Juda tez-tez so'rov yuboryapsiz.\n\nBotni himoya qilish maqsadida akkauntingiz 1 daqiqaga vaqtincha cheklab qo'yildi.\n\n🕐 Qolgan vaqt: {{time}}.",
+    "callback": "⏳ Vaqtincha cheklovdasiz. Biroz kuting."
+  },
+  "order": {
+    "chooseConsole": "🎮 Qaysi konsolni tanlaysiz?",
+    "noConsoles": "❗️ Hozircha faol konsol turlari mavjud emas. Admin bilan bog'laning yoki keyinroq urinib ko'ring.",
+    "consoleUnavailable": "❗️ Tanlangan konsol hozir mavjud emas. Qaytadan tanlang.",
+    "chooseDuration": "🎮 {{name}}\n\n⏱ Ijara muddatini tanlang:",
+    "pricesLoadFail": "Ijara narxlari yuklanmadi. Qaytadan urinib ko'ring.",
+    "chooseDate": "📅 Ijara boshlanish sanasini tanlang:",
+    "manualDatePrompt": "📅 Sanani quyidagi formatda kiriting: KK.OO.YYYY (masalan 07.07.2026)",
+    "manualDateBadFormat": "❗️ Format noto'g'ri. Masalan: 07.07.2026 ko'rinishida kiriting.",
+    "manualDateInvalid": "❗️ Sana noto'g'ri kiritildi, qaytadan urinib ko'ring.",
+    "pastDate": "❗️ O'tib ketgan sanani tanlab bo'lmaydi. Bugun yoki kelajak sanani kiriting.",
+    "chooseTime": "🕒 Boshlanish vaqtini tanlang:",
+    "noTimesToday": "❗️ Bugun uchun mavjud vaqtlar tugagan. Boshqa sanani tanlang yoki ertangi kunni tanlang.",
+    "badTime": "❗️ Vaqt noto'g'ri. Qaytadan tanlang.",
+    "needDateFirst": "❗️ Avval sanani tanlang.",
+    "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan.\n\nIltimos, hozirgi vaqtdan keyingi vaqtni tanlang.",
+    "askPromo": "🏷️ Promo-kodingiz bormi?",
+    "enterPromo": "🏷️ Promo-kodni kiriting:\n\nO'tkazib yuborish uchun /skip yuboring.",
+    "promoSkipped": "➡️ Promo-kod o'tkazib yuborildi. Chegirmasiz davom etamiz.",
+    "promoAccepted": "✅ <b>Promo-kod qabul qilindi:</b> {{code}}\n\n💰 Asl narx: {{base}}\n🎁 Chegirma: −{{discount}}\n💵 Ijara (chegirma bilan): {{rental}}\n🚚 Yetkazib berish: {{delivery}}\n💰 Jami: <b>{{total}}</b>",
+    "promoInvalid": "❗️ {{reason}}\n\nQaytadan kiriting yoki /skip yozing.",
+    "sessionExpired": "❗️ Sessiya muddati tugagan. Qaytadan buyurtma bering.",
+    "priceUnavailable": "❗️ Tanlangan narx yoki konsol endi mavjud emas. Qaytadan buyurtma bering.",
+    "confirmTitle": "📝 <b>Buyurtmangizni tekshiring:</b>",
+    "confirmConsole": "🎮 Konsol: {{name}}",
+    "confirmDuration": "⏱ Muddat: {{duration}}",
+    "confirmStart": "🕒 Boshlanish: {{datetime}}",
+    "confirmBase": "💰 Asl narx: {{price}}",
+    "confirmPromo": "🎁 Promo ({{code}}): −{{discount}}",
+    "confirmRental": "💵 Ijara: {{price}}",
+    "confirmDelivery": "🚚 Yetkazib berish: {{price}}",
+    "confirmTotal": "💰 Jami: <b>{{price}}</b>",
+    "confirmAsk": "Tasdiqlaysizmi?",
+    "creating": "⏳ Buyurtma yaratilmoqda...",
+    "alreadyCreating": "Buyurtma allaqachon yaratilmoqda...",
+    "created": "✅ Buyurtmangiz (#{{id}}) yaratildi!\n\nAdmin va kuryerlarga xabar yuborildi. Tez orada siz bilan bog'lanishadi.",
+    "createFail": "❗️ Buyurtma yaratilmadi: {{error}}",
+    "incomplete": "❗️ Buyurtma ma'lumotlari to'liq emas. Qaytadan urinib ko'ring.",
+    "cancelled": "❌ Buyurtma bekor qilindi.",
+    "cannotCancelCreating": "Buyurtma yaratilmoqda, bekor qilib bo'lmaydi.",
+    "sessionGone": "❗️ Sessiya tugagan. Qaytadan buyurtma bering.",
+    "otherDate": "📅 Boshqa sana kiritish",
+    "today": "Bugun ({{date}})",
+    "tomorrow": "Ertaga ({{date}})",
+    "duration1": "📅 1 kun",
+    "duration2": "📅 2 kun",
+    "duration3": "📅 3 kun",
+    "durationDays": "📅 {{n}} kun",
+    "durationHours": "{{n}} soat",
+    "promoHave": "🏷️ Promo-kodim bor",
+    "promoSkipBtn": "➡️ O'tkazib yuborish",
+    "confirmBtn": "✅ Tasdiqlash",
+    "cancelBtn": "❌ Bekor qilish",
+    "confirmedBtn": "✅ Tasdiqlandi",
+    "loadingBtn": "⏳ Buyurtma yaratilmoqda..."
+  },
+  "extend": {
+    "none": "Faol ijaralar topilmadi.\n\nUzaytirish uchun buyurtma yetkazib berilgan (faol ijara) holatida bo'lishi kerak.",
+    "pick": "Qaysi buyurtmani uzaytirmoqchisiz?",
+    "pickItem": "#{{id}} {{console}} — tugash: {{end}}",
+    "notFound": "Buyurtma topilmadi",
+    "notActive": "❗️ Bu buyurtma faol emas (holat: {{status}}) — uzaytirib bo'lmaydi.",
+    "askHours": "⏳ Buyurtma #{{id}} ({{console}})\nHozirgi tugash: {{end}}\n\nQancha uzaytirmoqchisiz?",
+    "day1": "📅 1 kun",
+    "day2": "📅 2 kun",
+    "day3": "📅 3 kun",
+    "requested": "✅ Uzaytirish so'rovi yuborildi.\n\nQo'shimcha: {{duration}}\nNarx: {{price}} so'm\nYangi tugash (tasdiqlansa): {{newEnd}}\n\nAdmin javobini kuting.",
+    "fail": "❗️ {{error}}"
+  },
+  "myOrders": {
+    "empty": "Sizda hali buyurtmalar yo'q.",
+    "title": "📦 <b>Buyurtma #{{id}}</b>",
+    "console": "🎮 Konsol: {{type}}",
+    "status": "📌 Holat: <b>{{status}}</b>",
+    "created": "📅 Yaratilgan: {{datetime}}",
+    "delivered": "🚚 Topshirilgan: {{datetime}}",
+    "returned": "📥 Qaytarilgan: {{datetime}}",
+    "duration": "⏳ Ijara muddati: {{duration}}",
+    "extension": "➕ Uzaytirish: +{{duration}}",
+    "start": "📆 Boshlanish: {{datetime}}",
+    "end": "🏁 Tugash: {{datetime}}",
+    "remaining": "⏱ Qolgan vaqt: {{time}}",
+    "remainingExpired": "⏱ Qolgan vaqt: muddat tugagan",
+    "endedToday": "📆 Bugun tugagan",
+    "endedDays": "📆 {{n}} kun oldin tugagan",
+    "basePrice": "💰 Asl narx: {{price}}",
+    "promo": "🎁 Promo ({{code}}): {{label}} → −{{discount}}",
+    "delivery": "🚚 Yetkazib berish: {{price}}",
+    "total": "💵 Yakuniy summa: <b>{{price}}</b>",
+    "address": "📍 Manzil: {{address}}",
+    "courier": "👤 Kuryer: {{name}}",
+    "remainingDetail": "⏱ Qolgan vaqt: {{time}}"
+  },
+  "status": {
+    "PENDING": "Kutilmoqda",
+    "COURIER_ASSIGNED": "Tasdiqlandi",
+    "ACCEPTED": "Tasdiqlandi",
+    "ON_THE_WAY": "Yo'lda",
+    "ARRIVED": "Faol ijara",
+    "DELIVERED": "Faol ijara",
+    "RETURN_REQUESTED": "Faol ijara",
+    "RETURNED": "Tugallandi",
+    "COMPLETED": "Tugallandi",
+    "CANCELLED": "Bekor qilindi",
+    "REJECTED": "Rad etildi",
+    "EXPIRED": "Tugallandi",
+    "EXTENDED": "Uzaytirildi",
+    "ACTIVE": "Faol ijara"
+  },
+  "address": {
+    "askNew": "📍 Yangi manzilingizni yozing yoki lokatsiya yuboring:"
+  },
+  "changeAddress": {
+    "prompt": "📍 Yangi manzilingizni yozing yoki lokatsiya yuboring:"
+  },
+  "errors": {
+    "generic": "Xatolik yuz berdi, qaytadan urinib ko'ring.",
+    "callback": "Xatolik yuz berdi, qaytadan urinib ko'ring."
+  },
+  "currency": {
+    "uzs": " so'm"
+  },
+  "review": {
+    "already": "Siz bu buyurtmaga allaqachon baho bergansiz.",
+    "thanks": "Rahmat! Siz {{stars}} baho berdingiz. 🎉"
+  },
+  "promo": {
+    "empty": "Promo-kod bo'sh",
+    "notFound": "Promo-kod topilmadi",
+    "inactive": "Promo-kod o'chirilgan",
+    "expired": "Promo-kod muddati tugagan",
+    "limit": "Promo-kod limiti tugagan",
+    "minOrder": "Minimal buyurtma: {{amount}}",
+    "loyalty": "Kamida {{n}} ta buyurtma kerak",
+    "perUser": "Siz bu promo-kod limitidan foydalangansiz",
+    "noDiscount": "Chegirma qo'llanilmaydi"
+  },
+  "datetime": {
+    "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan.\n\nIltimos, hozirgi vaqtdan keyingi vaqtni tanlang.",
+    "invalidStart": "Boshlanish vaqti noto'g'ri",
+    "pastDate": "O'tib ketgan sanani tanlab bo'lmaydi"
+  },
+  "maintenance": {
+    "blocked": "🚧 Texnik ishlar olib borilmoqda. Yangi buyurtma vaqtincha qabul qilinmaydi."
+  },
+  "orderErrors": {
+    "priceGone": "Tanlangan ijara narxi endi mavjud emas",
+    "priceMismatch": "Tanlangan narx konsol turiga mos kelmaydi",
+    "consoleGone": "Tanlangan konsol hozir mavjud emas",
+    "noAddress": "Manzil ko'rsatilmagan"
+  },
+  "extendErrors": {
+    "badHours": "Faqat 1/2/3 kun (24/48/72 soat) uzaytirish mumkin",
+    "notFound": "Buyurtma topilmadi",
+    "notActive": "Faqat faol ijara (yetkazilgan) uzaytirilishi mumkin",
+    "ended": "Ijara muddati allaqachon tugagan — uzaytirib bo'lmaydi",
+    "pendingExists": "Kutilayotgan uzaytirish so'rovi allaqachon mavjud. Admin javobini kuting."
+  },
+  "notify": {
+    "accepted": "🚚 <b>Sizning buyurtmangizni kuryer qabul qildi.</b>\n\n👤 <b>Ismi:</b>\n{{name}}\n\n📞 <b>Telefon:</b>\n{{phone}}\n\n⏱ Taxminiy yetib borish: 30-60 daqiqa\n\nBuyurtma raqami: #{{id}}",
+    "statusDefault": "📦 Buyurtma #{{id}}: {{status}}",
+    "returned": "↩️ <b>PlayStation qaytarib olindi</b>\n\nBuyurtma: #{{id}}\nQurilma: {{unit}}\nRahmat! Xizmatimizdan foydalanganingiz uchun minnatdormiz.",
+    "rejectedCourier": "❌ Buyurtmangiz (#{{id}}) kuryer tomonidan rad etildi.\n\nYangi buyurtma berishingiz mumkin.",
+    "rejectedAdmin": "❌ Buyurtmangiz (#{{id}}) admin tomonidan rad etildi.\n\nSavollar bo'lsa qo'llab-quvvatlashga yozing.",
+    "cancelled": "❌ Buyurtmangiz (#{{id}}) bekor qilindi.",
+    "onTheWay": "📦 Buyurtma #{{id}}: Kuryer yo'lga chiqdi",
+    "arrived": "📦 Buyurtma #{{id}}: Kuryer yetib keldi",
+    "delivered": "📦 Buyurtma #{{id}}: Yetkazib berildi",
+    "returnRequested": "📦 Buyurtma #{{id}}: Qaytarish so'raldi",
+    "extApproved": "✅ Ijara uzaytirildi\n\nBuyurtma #{{id}}\nQo'shimcha: {{duration}}\nYangi tugash: {{newEnd}}\nQo'shimcha to'lov: {{price}}",
+    "extRejected": "❌ Buyurtma #{{id}} uchun uzaytirish so'rovi rad etildi.",
+    "reminder": "⏰ Diqqat! Buyurtma #{{id}} ijara muddati {{hours}} soatdan keyin tugaydi.",
+    "expired": "⌛ Buyurtma #{{id}} ijara muddati tugadi. Iltimos konsolni qaytarish uchun kuryer bilan bog'laning.",
+    "handoverComplete": "✅ <b>Qurilmangiz muvaffaqiyatli topshirildi.</b>\n\n🎮 Konsol:\n{{console}}\n\n🕒 Boshlanish:\n{{start}}\n\n🏁 Tugash:\n{{end}}\n\n💰 To'langan:\n{{paid}}\n\n💳 To'lov:\n{{payment}}\n\n🪪 Garov:\n{{collateral}}\n\nYaxshi o'yin tilaymiz! 🎉"
+  },
+  "time": {
+    "minute": "{{n}} daqiqa",
+    "second": "{{n}} soniya",
+    "dayHour": "{{days}} kun {{hours}} soat",
+    "hourMin": "{{hours}} soat {{mins}} daqiqa"
+  },
+  "handover": {
+    "payment": {
+      "CASH": "Naqd",
+      "CARD": "Karta",
+      "CLICK": "Click"
+    },
+    "collateral": {
+      "ID_CARD": "ID Karta",
+      "PASSPORT": "Passport",
+      "NONE": "Hujjat olinmadi"
+    }
+  }
+}

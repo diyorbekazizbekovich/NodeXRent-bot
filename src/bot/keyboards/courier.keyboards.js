@@ -67,6 +67,47 @@ function deliveredKeyboard(orderId) {
   };
 }
 
+/** Topshirish 1-bosqich: garov hujjati */
+function handoverCollateralKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🪪 ID Karta", callback_data: `courier:handover:collateral:${orderId}:ID_CARD` }],
+        [{ text: "📕 Passport", callback_data: `courier:handover:collateral:${orderId}:PASSPORT` }],
+        [{ text: "❌ Hujjat olinmadi", callback_data: `courier:handover:collateral:${orderId}:NONE` }],
+      ],
+    },
+  };
+}
+
+/** "Hujjat olinmadi" tasdiqi */
+function handoverNoneConfirmKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ Ha", callback_data: `courier:handover:noneConfirm:${orderId}:yes` },
+          { text: "❌ Yo'q", callback_data: `courier:handover:noneConfirm:${orderId}:no` },
+        ],
+      ],
+    },
+  };
+}
+
+/** Topshirish 2-bosqich: to'lov usuli */
+function handoverPaymentKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "💵 Naqd", callback_data: `courier:handover:pay:${orderId}:CASH` },
+          { text: "💳 Karta", callback_data: `courier:handover:pay:${orderId}:CARD` },
+        ],
+      ],
+    },
+  };
+}
+
 function cancelKeyboard(orderId) {
   return {
     reply_markup: {
@@ -83,5 +124,8 @@ module.exports = {
   onTheWayKeyboard,
   arrivedKeyboard,
   deliveredKeyboard,
+  handoverCollateralKeyboard,
+  handoverNoneConfirmKeyboard,
+  handoverPaymentKeyboard,
   cancelKeyboard,
 };

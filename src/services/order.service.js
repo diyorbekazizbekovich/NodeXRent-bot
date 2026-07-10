@@ -8,6 +8,7 @@ const deliveryZoneService = require("./deliveryZone.service");
 const paymentService = require("./payment.service");
 const customerRepository = require("../repositories/customer.repository");
 const { addHours } = require("../utils/dateHelper");
+const { validateStartDatetime } = require("../validators/orderDatetime.validator");
 
 /**
  * Yangi buyurtma yaratadi va barcha admin/kuryerlarga xabar yuboradi.
@@ -24,13 +25,37 @@ async function createOrder({
   depositAmount = 0,
 }) {
   const rental = await pricingService.getRentalPriceById(rentalPriceId);
+  if (!rental.isActive) {
+    const err = new Error("Tanlangan ijara narxi endi mavjud emas");
+    err.messageKey = "orderErrors.priceGone";
+    throw err;
+  }
   if (rental.consoleType !== consoleType) {
-    throw new Error("Tanlangan narx konsol turiga mos kelmaydi");
+    const err = new Error("Tanlangan narx konsol turiga mos kelmaydi");
+    err.messageKey = "orderErrors.priceMismatch";
+    throw err;
   }
 
-  const start = new Date(startDatetime);
-  if (isNaN(start.getTime())) throw new Error("Boshlanish vaqti noto'g'ri");
+  const activeConsoles = await pricingService.listActiveConsoles();
+  if (!activeConsoles.some((c) => c.code === consoleType)) {
+    const err = new Error("Tanlangan konsol hozir mavjud emas");
+    err.messageKey = "orderErrors.consoleGone";
+    throw err;
+  }
 
+  const timeValidation = validateStartDatetime(startDatetime);
+  if (!timeValidation.valid) {
+    const err = new Error(timeValidation.reason);
+    err.messageKey =
+      timeValidation.code === "PAST_TIME"
+        ? "datetime.pastTime"
+        : timeValidation.code === "PAST_DATE"
+          ? "datetime.pastDate"
+          : "datetime.invalidStart";
+    throw err;
+  }
+
+  const start = timeValidation.start;
   const endDatetime = addHours(start, rental.duration);
 
   let promo = null;
@@ -43,35 +68,48 @@ async function createOrder({
     address ||
     (userLat != null && userLon != null
       ? `Lokatsiya: ${Number(userLat).toFixed(5)}, ${Number(userLon).toFixed(5)}`
-      : "Manzil ko'rsatilmagan");
+      : "Manzil ko'rsatilmagan"); // stored value; UI uses i18n separately
 
-  const order = await orderRepository.create({
-    userId,
-    consoleType,
-    address: resolvedAddress,
-    latitude: userLat,
-    longitude: userLon,
-    rentalPriceId,
-    promocodeId: promo ? promo.id : null,
-    startDatetime: start,
-    endDatetime,
-    totalPrice,
-    deliveryFee,
-    deliveryZoneCode: deliveryZoneService.DEFAULT_ZONE,
-    depositAmount: depositAmount || 0,
-    status: "PENDING",
-    playstationId: null,
-    courierId: null,
+  const order = await prisma.$transaction(async (tx) => {
+    const created = await tx.order.create({
+      data: {
+        userId,
+        consoleType,
+        address: resolvedAddress,
+        latitude: userLat,
+        longitude: userLon,
+        rentalPriceId,
+        promocodeId: promo ? promo.id : null,
+        startDatetime: start,
+        endDatetime,
+        totalPrice,
+        deliveryFee,
+        deliveryZoneCode: deliveryZoneService.DEFAULT_ZONE,
+        depositAmount: depositAmount || 0,
+        status: "PENDING",
+        playstationId: null,
+        courierId: null,
+      },
+    });
+
+    await tx.orderStatusLog.create({
+      data: {
+        orderId: created.id,
+        status: "PENDING",
+        actorType: "system",
+        note: "Buyurtma yaratildi",
+      },
+    });
+
+    if (promo) {
+      await tx.promocode.update({
+        where: { id: promo.id },
+        data: { usedCount: { increment: 1 } },
+      });
+    }
+
+    return created;
   });
-
-  await orderRepository.createStatusLog(order.id, "PENDING", {
-    actorType: "system",
-    note: "Buyurtma yaratildi",
-  });
-
-  if (promo) {
-    await pricingService.incrementPromocodeUsage(promo.id);
-  }
 
   const fullOrder = await orderRepository.findById(order.id);
   await paymentService.initOrderPayment(fullOrder);
@@ -94,7 +132,14 @@ async function listUserOrders(userId, { take = 10 } = {}) {
     where: { userId },
     orderBy: { createdAt: "desc" },
     take,
-    include: { rentalPrice: true, courier: true },
+    include: {
+      rentalPrice: true,
+      courier: true,
+      promocode: true,
+      extensions: { orderBy: { requestedAt: "asc" } },
+      statusLogs: { orderBy: { changedAt: "asc" } },
+      inventoryUnit: true,
+    },
   });
 }
 
