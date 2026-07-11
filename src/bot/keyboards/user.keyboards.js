@@ -80,7 +80,7 @@ function quickDateKeyboard(options, lang) {
 }
 
 function timeKeyboard(baseDate) {
-  const { getAvailableTimeSlots } = require("../../validators/orderDatetime.validator");
+  const { getAvailableTimeSlots } = require("../../services/bookingSlot.service");
   const times = getAvailableTimeSlots(baseDate);
   if (times.length === 0) {
     return null;
@@ -154,6 +154,33 @@ function ratingKeyboard(orderId) {
   };
 }
 
+function locationUpdatePickKeyboard(orders, lang) {
+  const L = resolveLang(lang);
+  const { label } = require("../../constants/orderStatus");
+  const rows = orders.map((o) => [
+    {
+      text: t("locationUpdate.pickItem", L, {
+        id: o.id,
+        console: o.consoleType,
+        status: label(o.status),
+      }),
+      callback_data: `order:loc:${o.id}`,
+    },
+  ]);
+  return { reply_markup: { inline_keyboard: rows } };
+}
+
+function orderLocationActionKeyboard(orderId, lang) {
+  const L = resolveLang(lang);
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: t("locationUpdate.btn", L), callback_data: `order:loc:${orderId}` }],
+      ],
+    },
+  };
+}
+
 module.exports = {
   mainMenuKeyboard,
   contactRequestKeyboard,
@@ -166,4 +193,6 @@ module.exports = {
   confirmKeyboard,
   loadingConfirmKeyboard,
   ratingKeyboard,
+  locationUpdatePickKeyboard,
+  orderLocationActionKeyboard,
 };

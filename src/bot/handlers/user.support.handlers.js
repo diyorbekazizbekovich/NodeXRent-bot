@@ -20,40 +20,39 @@ function registerUserSupportHandlers(bot) {
     const parts = query.data.split(":");
     const action = parts[2];
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     try {
       const user = await userService.getUserByTelegramId(telegramId);
       const L = resolveLang(user?.language);
 
       if (!user) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: t("support.needRegister", L) });
+        await bot.sendMessage(chatId, t("support.needRegister", L));
         return true;
       }
 
       if (action === "reply") {
         const threadId = Number(parts[3]);
         if (!Number.isFinite(threadId) || threadId <= 0) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: t("support.invalid", L) });
+          await bot.sendMessage(chatId, t("support.invalid", L));
           return true;
         }
 
         try {
           await supportChatService.assertThreadOwnedByUser(threadId, user.id);
         } catch (_) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: t("support.forbidden", L) });
+          await bot.sendMessage(chatId, t("support.forbidden", L));
           return true;
         }
 
         sessionStore.setStep(chatId, STEPS.USER_REPLY);
         sessionStore.updateData(chatId, { _supportThreadId: threadId, _supportUserId: user.id });
         await bot.sendMessage(chatId, t("support.askReply", L));
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       logger.error("User support callback error", { error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Xato" });
+      await bot.sendMessage(chatId, "Xato");
     }
     return true;
   });

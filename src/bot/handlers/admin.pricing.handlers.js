@@ -22,8 +22,11 @@ function registerPricingAdmin(bot, isAdmin) {
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -92,7 +95,6 @@ function registerPricingAdmin(bot, isAdmin) {
         } catch (delErr) {
           const msg = delErr instanceof PricingError ? delErr.message : delErr.message;
           await bot.sendMessage(chatId, msg);
-          await safeAnswerCallbackQuery(bot, query.id, { text: "O'chirib bo'lmadi" });
           return true;
         }
       } else if (data.startsWith("admin:pricing:pick:")) {
@@ -122,16 +124,11 @@ function registerPricingAdmin(bot, isAdmin) {
         await bot.sendMessage(chatId, `✅ #${id} endi ${rental.isActive ? "nofaol" : "faol"}.`);
         sessionStore.clearSession(chatId);
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       const text = err instanceof PricingError ? err.message : err.message || "Xatolik";
       try {
         await bot.sendMessage(chatId, text.length > 200 ? text.slice(0, 200) + "…" : text);
       } catch (_) {}
-      await safeAnswerCallbackQuery(bot, query.id, {
-        text: text.length > 180 ? "Xatolik — chatdagi xabarni ko'ring" : text,
-      });
     }
     return true;
   });

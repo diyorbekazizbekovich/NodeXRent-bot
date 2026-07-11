@@ -21,8 +21,12 @@ function registerAdminOrderHandlers(bot, isAdmin) {
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
+    // Ack before admin checks / assignment / DB (idempotent)
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -61,11 +65,9 @@ function registerAdminOrderHandlers(bot, isAdmin) {
         const order = await orderAssignmentService.assignOrderByAdmin(orderId, courierId);
         await bot.sendMessage(chatId, `✅ Buyurtma #${order.id} kuryerga biriktirildi.`);
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       const msg = err instanceof OrderAssignmentError ? err.message : "Xatolik yuz berdi";
-      await safeAnswerCallbackQuery(bot, query.id, { text: msg });
+      await bot.sendMessage(chatId, msg);
     }
     return true;
   });

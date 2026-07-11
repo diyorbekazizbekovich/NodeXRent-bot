@@ -22,6 +22,8 @@ const env = {
   RETURN_REMINDER_HOURS_BEFORE: Number(process.env.RETURN_REMINDER_HOURS_BEFORE) || 2,
   COURIER_RESPONSE_TIMEOUT_MINUTES: Number(process.env.COURIER_RESPONSE_TIMEOUT_MINUTES) || 10,
   DEFAULT_COMMISSION_PERCENT: Number(process.env.DEFAULT_COMMISSION_PERCENT) || 0,
+  /** Mijoz yetkazib berish lokatsiyasini qayta yuborish oralig'i (ms) */
+  LOCATION_UPDATE_COOLDOWN_MS: Number(process.env.LOCATION_UPDATE_COOLDOWN_MS) || 30_000,
 };
 
 if (!env.BOT_TOKEN) {

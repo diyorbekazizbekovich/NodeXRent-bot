@@ -80,9 +80,11 @@ async function handleCallback(bot, query, courier, data) {
   const orderId = Number(parts[3]);
   const chatId = query.message.chat.id;
 
+  await safeAnswerCallbackQuery(bot, query.id);
+
   const order = await orderService.getOrderById(orderId);
   if (!order || order.courierId !== courier.id) {
-    await safeAnswerCallbackQuery(bot, query.id, { text: "Buyurtma topilmadi" });
+    await bot.sendMessage(chatId, "Buyurtma topilmadi");
     return true;
   }
 
@@ -90,7 +92,7 @@ async function handleCallback(bot, query, courier, data) {
     const linkId = Number(parts[4]);
     const allowed = (order.orderItems || []).some((l) => l.id === linkId);
     if (!allowed) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Bu inventar ushbu buyurtmaga tegishli emas" });
+      await bot.sendMessage(chatId, "Bu inventar ushbu buyurtmaga tegishli emas");
       return true;
     }
     const session = sessionStore.getSession(chatId);
@@ -104,8 +106,6 @@ async function handleCallback(bot, query, courier, data) {
         { chat_id: chatId, message_id: query.message.message_id }
       );
     } catch (_) {}
-
-    await safeAnswerCallbackQuery(bot, query.id, { text: "OK" });
 
     if (allItemsConfirmed({ _retConfirmed: confirmed })) {
       sessionStore.setStep(chatId, STEPS.COLLATERAL);
@@ -129,7 +129,6 @@ async function handleCallback(bot, query, courier, data) {
     } catch (_) {}
     sessionStore.setStep(chatId, STEPS.CONDITION);
     await bot.sendMessage(chatId, `Qurilma holati:`, invKb.returnConditionKeyboard(orderId));
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 
@@ -147,7 +146,6 @@ async function handleCallback(bot, query, courier, data) {
       chatId,
       `Izoh yozing (ixtiyoriy) yoki /skip yuboring:`
     );
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 

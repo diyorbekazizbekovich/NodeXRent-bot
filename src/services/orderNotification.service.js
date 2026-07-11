@@ -1,10 +1,11 @@
 const { formatDatetime } = require("../utils/dateHelper");
 const pricingService = require("./pricing.service");
-const { notify, sendToTelegram } = require("./notification.service");
+const { notify, sendToTelegram, sendTelegramLocation } = require("./notification.service");
 const { getAdminRecipients } = require("../utils/adminRecipients");
 const { label } = require("../constants/orderStatus");
 const adminOrderKeyboards = require("../bot/keyboards/admin.order.keyboards");
 const courierKeyboards = require("../bot/keyboards/courier.keyboards");
+const logger = require("../utils/logger");
 
 function formatUsername(username) {
   return username ? `@${username.replace(/^@/, "")}` : "—";
@@ -208,8 +209,96 @@ async function notifyPlaystationReturned(order) {
   }
 }
 
+function googleMapsUrl(latitude, longitude) {
+  return `https://maps.google.com/?q=${latitude},${longitude}`;
+}
+
+function buildLocationUpdateText(order, { forCourier = false } = {}) {
+  const lat = Number(order.latitude);
+  const lon = Number(order.longitude);
+  const maps = googleMapsUrl(lat, lon);
+  const customer = order.user?.fullName || order.user?.phone || "—";
+
+  let text =
+    `📍 <b>Yetkazib berish manzili yangilandi</b>\n\n` +
+    `📦 Buyurtma: <b>#${order.id}</b>\n` +
+    `👤 Mijoz: ${customer}\n` +
+    `📌 Status: <b>${label(order.status)}</b>\n\n` +
+    `🗺 Yangi koordinatalar:\n` +
+    `• Latitude: <code>${lat.toFixed(6)}</code>\n` +
+    `• Longitude: <code>${lon.toFixed(6)}</code>\n` +
+    `• Manzil: ${order.address || "—"}\n\n` +
+    `🔗 <a href="${maps}">Google Maps</a>`;
+
+  if (forCourier) {
+    text +=
+      `\n\n⚠️ Mijoz yetkazib berish lokatsiyasini o'zgartirdi.\n` +
+      `Iltimos, yangi manzilga boring.`;
+  }
+
+  return text;
+}
+
+/**
+ * Kuryer (agar biriktirilgan) + adminlarga yangi lokatsiya.
+ * Kuryerga native pin ham yuboriladi — ochiq xarita yangilanadi.
+ */
+async function notifyLocationUpdated(order) {
+  const lat = order.latitude;
+  const lon = order.longitude;
+  if (lat == null || lon == null) {
+    logger.warn("notifyLocationUpdated: coords missing", { orderId: order.id });
+    return;
+  }
+
+  if (order.courier?.telegramId) {
+    const courierText = buildLocationUpdateText(order, { forCourier: true });
+    const sent = await notify({
+      orderId: order.id,
+      type: "LOCATION_UPDATED",
+      recipientType: "courier",
+      recipientTelegramId: order.courier.telegramId.toString(),
+      recipientId: order.courier.id,
+      text: courierText,
+      options: {
+        parse_mode: "HTML",
+        disable_web_page_preview: false,
+        ...courierKeyboards.locationUpdateKeyboard(order.id, lat, lon),
+      },
+    });
+    if (sent) {
+      await sendTelegramLocation(order.courier.telegramId, lat, lon);
+    } else {
+      logger.warn("Courier offline or unreachable for location update", {
+        context: "OrderNotification",
+        orderId: order.id,
+        courierId: order.courier.id,
+      });
+    }
+  } else {
+    logger.info("Location updated — courier not assigned yet", {
+      context: "OrderNotification",
+      orderId: order.id,
+    });
+  }
+
+  const adminText = buildLocationUpdateText(order, { forCourier: false });
+  const admins = await getAdminRecipients();
+  for (const admin of admins) {
+    await notify({
+      orderId: order.id,
+      type: "LOCATION_UPDATED",
+      recipientType: "admin",
+      recipientTelegramId: String(admin.telegramId),
+      recipientId: admin.recipientId,
+      text: adminText,
+      options: { parse_mode: "HTML", disable_web_page_preview: false },
+    });
+  }
+}
+
 async function sendLocation(chatId, latitude, longitude) {
-  await sendToTelegram(chatId, `📍 <a href="https://maps.google.com/?q=${latitude},${longitude}">Xaritada ochish</a>`, {
+  await sendToTelegram(chatId, `📍 <a href="${googleMapsUrl(latitude, longitude)}">Xaritada ochish</a>`, {
     parse_mode: "HTML",
     disable_web_page_preview: false,
   });
@@ -263,5 +352,7 @@ module.exports = {
   notifyPlaystationReturned,
   notifySingleCourierAssignment,
   notifyOrderRejected,
+  notifyLocationUpdated,
   sendLocation,
+  googleMapsUrl,
 };

@@ -258,6 +258,9 @@ function register(bot) {
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
 
+    // Ack before DB / wizard / assignment work (idempotent if router already answered)
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (data.startsWith("courier:settings:")) {
       const sub = data.split(":")[2];
       if (sub === "profile") {
@@ -271,14 +274,13 @@ function register(bot) {
           },
         });
       }
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
     try {
       const courier = await courierService.getCourierByTelegramId(telegramId);
       if (!courier || !courier.isActive) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Kuryer faol emas." });
+        await bot.sendMessage(chatId, "Kuryer faol emas.");
         return true;
       }
 
@@ -309,6 +311,15 @@ function register(bot) {
       } else if (action === "location") {
         const order = await orderService.getOrderById(orderId);
         if (order?.latitude != null && order?.longitude != null) {
+          const maps = `https://maps.google.com/?q=${order.latitude},${order.longitude}`;
+          await bot.sendMessage(
+            chatId,
+            `📍 <b>Buyurtma #${order.id}</b> manzili\n` +
+              `Lat: <code>${Number(order.latitude).toFixed(6)}</code>\n` +
+              `Lon: <code>${Number(order.longitude).toFixed(6)}</code>\n` +
+              `🔗 <a href="${maps}">Google Maps</a>`,
+            { parse_mode: "HTML", disable_web_page_preview: false }
+          );
           await bot.sendLocation(chatId, order.latitude, order.longitude);
         } else {
           await bot.sendMessage(chatId, "Lokatsiya mavjud emas.");
@@ -354,12 +365,16 @@ function register(bot) {
         await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "CANCELLED");
         await bot.sendMessage(chatId, `❌ Buyurtma #${orderId} bekor qilindi.`);
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
-      const msg = err instanceof OrderAssignmentError ? err.message : "Xatolik yuz berdi";
-      logger.error("Kuryer callback xatoligi", { context: "Bot", error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: msg });
+      const expected = err instanceof OrderAssignmentError;
+      const msg = expected ? err.message : "Xatolik yuz berdi";
+      logger[expected ? "warn" : "error"]("Kuryer callback xatoligi", {
+        context: "Bot",
+        error: err.message,
+        code: expected ? err.code : undefined,
+      });
+      if (expected) await clearInlineKeyboard(bot, query);
+      await bot.sendMessage(chatId, msg.slice(0, 180));
     }
     return true;
   });

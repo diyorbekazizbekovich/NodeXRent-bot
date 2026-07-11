@@ -52,6 +52,18 @@ const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED", "ACTIVE"];
 /** Faol ijara: qurilma mijozda */
 const ACTIVE_RENTAL_STATUSES = ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"];
 
+/**
+ * Mijoz yetkazib berish manzilini yangilashi mumkin bo'lgan statuslar.
+ * DELIVERED va undan keyin — taqiqlanadi.
+ */
+const LOCATION_UPDATABLE_STATUSES = [
+  OrderStatus.PENDING,
+  OrderStatus.COURIER_ASSIGNED,
+  OrderStatus.ACCEPTED,
+  OrderStatus.ON_THE_WAY,
+  OrderStatus.ARRIVED,
+];
+
 const TIMELINE_LABELS = {
   PENDING: "Buyurtma yaratildi",
   COURIER_ASSIGNED: "Kuryer biriktirildi",
@@ -82,6 +94,7 @@ module.exports = {
   ADMIN_FILTER_GROUPS,
   REVENUE_STATUSES,
   ACTIVE_RENTAL_STATUSES,
+  LOCATION_UPDATABLE_STATUSES,
   TIMELINE_LABELS,
   label,
   filterGroup,

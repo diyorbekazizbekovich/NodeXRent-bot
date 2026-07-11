@@ -502,8 +502,11 @@ function register(bot) {
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -531,14 +534,13 @@ function register(bot) {
       const id = Number(data.split(":")[3]);
       const promo = await prisma.promocode.findUnique({ where: { id } });
       if (!promo) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Topilmadi" });
+        await bot.sendMessage(chatId, "Topilmadi");
         return true;
       }
       await bot.sendMessage(chatId, promoService.formatPromoDetails(promo), {
         parse_mode: "HTML",
         ...promoActionKeyboard(promo.id, promo.isActive),
       });
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
@@ -546,7 +548,7 @@ function register(bot) {
       const id = Number(data.split(":")[3]);
       const promo = await prisma.promocode.findUnique({ where: { id } });
       if (!promo) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Topilmadi" });
+        await bot.sendMessage(chatId, "Topilmadi");
         return true;
       }
       const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });

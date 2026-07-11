@@ -28,8 +28,11 @@ function registerAdminCrmHandlers(bot, isAdmin) {
     if (!query.data?.startsWith("admin:crm:")) return false;
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -119,9 +122,8 @@ function registerAdminCrmHandlers(bot, isAdmin) {
         await customerCrmService.setRating(userId, rating, ctx);
         await bot.sendMessage(chatId, `✅ Reyting yangilandi: ${rating}`);
       }
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: err.message });
+      await bot.sendMessage(chatId, `❌ ${err.message}`);
     }
     return true;
   });

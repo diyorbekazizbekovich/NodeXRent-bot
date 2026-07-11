@@ -1,5 +1,6 @@
 const logger = require("../../utils/logger");
 const { registerListener } = require("./registry");
+const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 
 /** @type {{ name: string, handle: (bot, query) => Promise<boolean>|boolean }[]} */
 const callbackHandlers = [];
@@ -17,8 +18,19 @@ function addCallbackHandler(name, handle) {
   logger.info(`Callback handler queued: ${name}`, { context: "CallbackRouter" });
 }
 
+/**
+ * Dispatch callback. Acknowledges the query IMMEDIATELY (once), then runs handlers.
+ * Handlers may still call safeAnswerCallbackQuery (idempotent no-op after early ack).
+ * Long DB/API work must never delay the first answerCallbackQuery.
+ */
 async function dispatchCallbackQuery(bot, query) {
-  if (!query?.data) return;
+  if (!query?.id) return;
+
+  // Telegram ~30s timeout — answer before any handler / DB / API work
+  await safeAnswerCallbackQuery(bot, query.id);
+
+  if (!query.data) return;
+
   for (const { name, handle } of callbackHandlers) {
     try {
       const handled = await handle(bot, query);

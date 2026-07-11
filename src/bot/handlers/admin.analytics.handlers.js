@@ -59,8 +59,10 @@ function registerAdminAnalyticsHandlers(bot, isAdmin) {
     const telegramId = query.from.id;
     const messageId = query.message.message_id;
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -72,27 +74,22 @@ function registerAdminAnalyticsHandlers(bot, isAdmin) {
         await bot.sendMessage(chatId, "🏠 Admin menyu:", adminKeyboards.mainMenuKeyboard({
           isSuperAdmin: factoryResetService.isSuperAdmin(telegramId),
         }));
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
 
       if (action === "period" || action === "refresh") {
         const period = parts[3];
         if (!VALID_PERIODS.has(period)) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: "Noto'g'ri davr." });
+          await bot.sendMessage(chatId, "Noto'g'ri davr.");
           return true;
         }
         await editAnalytics(bot, chatId, messageId, period);
-        await safeAnswerCallbackQuery(bot, query.id, {
-          text: action === "refresh" ? "Yangilandi" : analyticsService.PERIOD_LABELS[period],
-        });
         return true;
       }
 
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Noma'lum amal." });
+      await bot.sendMessage(chatId, "Noma'lum amal.");
     } catch (err) {
       logger.error("Analytics callback error", { error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Xato" });
       try {
         await bot.sendMessage(chatId, `❗️ Analytics: ${err.message}`);
       } catch (_) {}

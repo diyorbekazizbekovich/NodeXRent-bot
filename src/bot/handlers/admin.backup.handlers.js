@@ -24,8 +24,12 @@ function registerAdminBackupHandlers(bot, isAdmin) {
 
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
+
+    // Ack before backup/file IO (can take many seconds)
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -64,9 +68,8 @@ function registerAdminBackupHandlers(bot, isAdmin) {
         const count = await auditLogService.clearAll(ctx);
         await bot.sendMessage(chatId, `✅ ${count} ta log o'chirildi.`);
       }
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: err.message });
+      await bot.sendMessage(chatId, `❌ ${err.message}`);
     }
     return true;
   });

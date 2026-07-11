@@ -16,8 +16,10 @@ function registerAdminSupportHandlers(bot, isAdmin) {
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -28,14 +30,13 @@ function registerAdminSupportHandlers(bot, isAdmin) {
       if (action === "cancel") {
         sessionStore.clearSession(chatId);
         await bot.sendMessage(chatId, "❌ Xabar yozish bekor qilindi.");
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
 
       if (action === "reply") {
         const userId = Number(parts[3]);
         if (!Number.isFinite(userId) || userId <= 0) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: "Noto'g'ri mijoz." });
+          await bot.sendMessage(chatId, "Noto'g'ri mijoz.");
           return true;
         }
         sessionStore.setStep(chatId, STEPS.ADMIN_COMPOSE);
@@ -46,14 +47,11 @@ function registerAdminSupportHandlers(bot, isAdmin) {
             "Matn, rasm, video, ovoz, fayl va boshqalar qabul qilinadi.",
           cancelComposeKeyboard()
         );
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       logger.error("Admin support callback error", { error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: err.message?.slice(0, 50) || "Xato" });
+      await bot.sendMessage(chatId, err.message?.slice(0, 200) || "Xato");
     }
     return true;
   });

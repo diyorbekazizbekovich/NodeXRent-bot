@@ -22,6 +22,10 @@ function settingsKeyboard() {
   };
 }
 
+function locationButton(orderId) {
+  return { text: "📍 Lokatsiya", callback_data: `courier:location:${orderId}` };
+}
+
 function newOrderKeyboard(orderId, lat, lon) {
   const rows = [
     [
@@ -30,7 +34,7 @@ function newOrderKeyboard(orderId, lat, lon) {
     ],
   ];
   if (lat != null && lon != null) {
-    rows.push([{ text: "📍 Lokatsiya", callback_data: `courier:location:${orderId}` }]);
+    rows.push([locationButton(orderId)]);
   }
   return { reply_markup: { inline_keyboard: rows } };
 }
@@ -38,7 +42,10 @@ function newOrderKeyboard(orderId, lat, lon) {
 function assignedOrderKeyboard(orderId) {
   return {
     reply_markup: {
-      inline_keyboard: [[{ text: "🚗 Yo'lga chiqish", callback_data: `courier:onway:${orderId}` }]],
+      inline_keyboard: [
+        [{ text: "🚗 Yo'lga chiqish", callback_data: `courier:onway:${orderId}` }],
+        [locationButton(orderId)],
+      ],
     },
   };
 }
@@ -46,7 +53,10 @@ function assignedOrderKeyboard(orderId) {
 function onTheWayKeyboard(orderId) {
   return {
     reply_markup: {
-      inline_keyboard: [[{ text: "📍 Yetib keldim", callback_data: `courier:arrived:${orderId}` }]],
+      inline_keyboard: [
+        [{ text: "📍 Yetib keldim", callback_data: `courier:arrived:${orderId}` }],
+        [locationButton(orderId)],
+      ],
     },
   };
 }
@@ -54,9 +64,25 @@ function onTheWayKeyboard(orderId) {
 function arrivedKeyboard(orderId) {
   return {
     reply_markup: {
-      inline_keyboard: [[{ text: "📦 Yetkazildi", callback_data: `courier:delivered:${orderId}` }]],
+      inline_keyboard: [
+        [{ text: "📦 Yetkazildi", callback_data: `courier:delivered:${orderId}` }],
+        [locationButton(orderId)],
+      ],
     },
   };
+}
+
+function locationUpdateKeyboard(orderId, lat, lon) {
+  const rows = [[locationButton(orderId)]];
+  if (lat != null && lon != null) {
+    rows.push([
+      {
+        text: "🗺 Google Maps",
+        url: `https://maps.google.com/?q=${lat},${lon}`,
+      },
+    ]);
+  }
+  return { reply_markup: { inline_keyboard: rows } };
 }
 
 function deliveredKeyboard(orderId) {
@@ -124,6 +150,7 @@ module.exports = {
   onTheWayKeyboard,
   arrivedKeyboard,
   deliveredKeyboard,
+  locationUpdateKeyboard,
   handoverCollateralKeyboard,
   handoverNoneConfirmKeyboard,
   handoverPaymentKeyboard,

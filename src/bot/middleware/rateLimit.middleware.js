@@ -3,6 +3,7 @@ const logger = require("../../utils/logger");
 const { t, resolveLang } = require("../../i18n");
 const env = require("../../config/env");
 const prisma = require("../../config/prisma");
+const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 
 /**
  * Telegram update dan foydalanuvchi id sini oladi.
@@ -121,13 +122,11 @@ function applyRateLimitMiddleware(bot) {
             }
 
             if (update.callback_query?.id) {
-              resolveUserLang(userId).then((L) => {
-                bot
-                  .answerCallbackQuery(update.callback_query.id, {
-                    text: t("rateLimit.callback", L),
-                    show_alert: false,
-                  })
-                  .catch(() => {});
+              // Answer immediately (do not wait on lang DB lookup)
+              const L = langCache.get(userId) || resolveLang();
+              safeAnswerCallbackQuery(bot, update.callback_query.id, {
+                text: t("rateLimit.callback", L),
+                show_alert: false,
               });
             }
             return;

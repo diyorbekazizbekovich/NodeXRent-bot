@@ -132,23 +132,25 @@ async function handleCallback(bot, query, courier, data) {
   const chatId = query.message.chat.id;
   const parts = data.split(":");
 
+  // Ack before inventory DB / edits (idempotent if already answered)
+  await safeAnswerCallbackQuery(bot, query.id);
+
   // courier:hw:console:orderId:itemId
   if (parts[1] === "hw") {
     const action = parts[2];
     if (action === "noop") {
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
     const orderId = Number(parts[3]);
     if (!Number.isFinite(orderId)) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Noto'g'ri" });
+      await bot.sendMessage(chatId, "Noto'g'ri");
       return true;
     }
 
     const order = await orderService.getOrderById(orderId);
     if (!order || order.courierId !== courier.id) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Buyurtma topilmadi" });
+      await bot.sendMessage(chatId, "Buyurtma topilmadi");
       return true;
     }
 
@@ -157,7 +159,6 @@ async function handleCallback(bot, query, courier, data) {
       patchHw(chatId, { _hwOrderId: orderId, _hwConsoleId: itemId });
       await clearKb(bot, query);
       await askJoysticks(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
@@ -169,7 +170,7 @@ async function handleCallback(bot, query, courier, data) {
         selected = selected.filter((id) => id !== itemId);
       } else {
         if (selected.length >= 4) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: "Faqat 4 ta!" });
+          await bot.sendMessage(chatId, "Faqat 4 ta!");
           return true;
         }
         selected.push(itemId);
@@ -184,19 +185,17 @@ async function handleCallback(bot, query, courier, data) {
           message_id: query.message.message_id,
         });
       } catch (_) {}
-      await safeAnswerCallbackQuery(bot, query.id, { text: `${selected.length}/4` });
       return true;
     }
 
     if (action === "jsDone") {
       const selected = hwData(chatId)._hwJoystickIds || [];
       if (selected.length !== 4) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Aniq 4 ta tanlang" });
+        await bot.sendMessage(chatId, "Aniq 4 ta tanlang");
         return true;
       }
       await clearKb(bot, query);
       await askHdmi(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
@@ -204,7 +203,6 @@ async function handleCallback(bot, query, courier, data) {
       patchHw(chatId, { _hwHdmiId: Number(parts[4]) });
       await clearKb(bot, query);
       await askPower(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
@@ -212,7 +210,6 @@ async function handleCallback(bot, query, courier, data) {
       patchHw(chatId, { _hwPowerId: Number(parts[4]) });
       await clearKb(bot, query);
       await askCollateral(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
   }
@@ -224,7 +221,7 @@ async function handleCallback(bot, query, courier, data) {
     const dataHw = hwData(chatId);
 
     if (!dataHw._hwConsoleId || !dataHw._hwHdmiId || !dataHw._hwPowerId || (dataHw._hwJoystickIds || []).length !== 4) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Avval inventarni tanlang" });
+      await bot.sendMessage(chatId, "Avval inventarni tanlang");
       await startHandoverWizard(bot, chatId, orderId);
       return true;
     }
@@ -239,7 +236,6 @@ async function handleCallback(bot, query, courier, data) {
           `⚠️ <b>Diqqat!</b>\n\nMijozdan hech qanday hujjat olinmadi.\n\nHaqiqatan ham davom etishni xohlaysizmi?`,
           { parse_mode: "HTML", ...courierKeyboards.handoverNoneConfirmKeyboard(orderId) }
         );
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
       patchHw(chatId, { _hwCollateral: collateralType });
@@ -247,7 +243,6 @@ async function handleCallback(bot, query, courier, data) {
         `🪪 ${collateralType}`,
       ]);
       await askPayment(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
@@ -256,25 +251,23 @@ async function handleCallback(bot, query, courier, data) {
       await clearKb(bot, query);
       if (answer === "no") {
         await askCollateral(bot, chatId, orderId);
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
       patchHw(chatId, { _hwCollateral: "NONE" });
       await deliveryHandoverService.notifyAdminStep(orderId, "Hujjat olinmadi (tasdiqlangan)");
       await askPayment(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
 
     if (sub === "pay") {
       const paymentMethod = parts[4];
       if (!["CASH", "CARD"].includes(paymentMethod)) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Noto'g'ri to'lov" });
+        await bot.sendMessage(chatId, "Noto'g'ri to'lov");
         return true;
       }
       const collateral = hwData(chatId)._hwCollateral;
       if (!collateral) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Avval hujjat" });
+        await bot.sendMessage(chatId, "Avval hujjat");
         await askCollateral(bot, chatId, orderId);
         return true;
       }
@@ -284,7 +277,6 @@ async function handleCallback(bot, query, courier, data) {
         `💳 ${paymentMethod}`,
       ]);
       await askPhoto(bot, chatId, orderId);
-      await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
   }

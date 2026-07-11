@@ -62,6 +62,8 @@ async function handleCallback(bot, query, data) {
   const chatId = query.message.chat.id;
   const parts = data.split(":");
 
+  await safeAnswerCallbackQuery(bot, query.id);
+
   if (parts[2] === "list") {
     const items = await inventoryItemService.listByType(null, { take: 40 });
     const lines = items.map(
@@ -70,7 +72,6 @@ async function handleCallback(bot, query, data) {
         (i.consoleType ? ` | ${i.consoleType}` : "")
     );
     await bot.sendMessage(chatId, lines.join("\n") || "Inventar bo'sh.");
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 
@@ -84,7 +85,6 @@ async function handleCallback(bot, query, data) {
       sessionStore.setStep(chatId, STEPS.INV_NUM);
       await bot.sendMessage(chatId, "Inventory Number (masalan NX-JS-001):");
     }
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 
@@ -94,7 +94,6 @@ async function handleCallback(bot, query, data) {
     sessionStore.updateData(chatId, { _invItem: { ...inv, consoleType } });
     sessionStore.setStep(chatId, STEPS.INV_NUM);
     await bot.sendMessage(chatId, "Inventory Number (masalan NX-PS5-001):");
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 
@@ -104,7 +103,6 @@ async function handleCallback(bot, query, data) {
     sessionStore.updateData(chatId, { _invItem: { ...inv, condition } });
     sessionStore.setStep(chatId, STEPS.PURCHASED);
     await bot.sendMessage(chatId, "Sotib olingan sana (KK.OO.YYYY) yoki /skip:");
-    await safeAnswerCallbackQuery(bot, query.id);
     return true;
   }
 

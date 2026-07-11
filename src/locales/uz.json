@@ -55,9 +55,10 @@
     "manualDateBadFormat": "❗️ Format noto'g'ri. Masalan: 07.07.2026 ko'rinishida kiriting.",
     "manualDateInvalid": "❗️ Sana noto'g'ri kiritildi, qaytadan urinib ko'ring.",
     "pastDate": "❗️ O'tib ketgan sanani tanlab bo'lmaydi. Bugun yoki kelajak sanani kiriting.",
-    "chooseTime": "🕒 Boshlanish vaqtini tanlang:",
-    "noTimesToday": "❗️ Bugun uchun mavjud vaqtlar tugagan. Boshqa sanani tanlang yoki ertangi kunni tanlang.",
-    "badTime": "❗️ Vaqt noto'g'ri. Qaytadan tanlang.",
+    "chooseTime": "🕒 Boshlanish vaqtini tanlang (faqat to'liq soatlar):",
+    "noTimesToday": "❗️ Bu sana uchun mavjud vaqtlar tugagan. Boshqa sanani tanlang yoki ertangi kunni tanlang.",
+    "outsideWorkingHours": "🌙 Hozir buyurtma qabul qilinmaydi.\n\n⏱ Xizmat ish vaqti: <b>09:00 dan 02:00 gacha</b>.\n\nIltimos, ish vaqtida qayta urinib ko'ring.",
+    "badTime": "❗️ Vaqt noto'g'ri. Faqat to'liq soatlarni tanlang (masalan 10:00).",
     "needDateFirst": "❗️ Avval sanani tanlang.",
     "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan.\n\nIltimos, hozirgi vaqtdan keyingi vaqtni tanlang.",
     "askPromo": "🏷️ Promo-kodingiz bormi?",
@@ -159,6 +160,22 @@
   "changeAddress": {
     "prompt": "📍 Yangi manzilingizni yozing yoki lokatsiya yuboring:"
   },
+  "locationUpdate": {
+    "prompt": "📍 Buyurtma #{{id}} uchun yangi yetkazib berish lokatsiyasini yuboring (Live Location ham mumkin):",
+    "pickOrder": "Qaysi buyurtma manzilini yangilaysiz?",
+    "pickItem": "#{{id}} — {{console}} — {{status}}",
+    "btn": "📍 Manzilni yangilash",
+    "saved": "✅ Yetkazib berish manzili yangilandi (buyurtma #{{id}}).\nKuryer xabardor qilindi.",
+    "savedNoCourier": "✅ Yetkazib berish manzili yangilandi (buyurtma #{{id}}).\nKuryer hali biriktirilmagan — biriktirilganda yangi manzil ko'rinadi.",
+    "profileOnly": "✅ Profilingizdagi manzil saqlandi.",
+    "locked": "❌ Buyurtma yetkazib berilgandan keyin manzilni o'zgartirib bo'lmaydi.",
+    "notFound": "Buyurtma topilmadi.",
+    "forbidden": "Bu buyurtmani yangilashga ruxsat yo'q.",
+    "invalid": "Noto'g'ri lokatsiya. Iltimos, Telegram orqali lokatsiya yuboring.",
+    "rateLimited": "⏳ Juda tez-tez yangilanmoqda. {{sec}} soniyadan keyin qayta urinib ko'ring.",
+    "fail": "❗️ Manzilni yangilab bo'lmadi: {{error}}",
+    "noneOpen": "Hozircha yetkazib berilayotgan buyurtma yo'q. Faqat profilingizdagi manzil yangilanadi."
+  },
   "errors": {
     "generic": "Xatolik yuz berdi, qaytadan urinib ko'ring.",
     "callback": "Xatolik yuz berdi, qaytadan urinib ko'ring."
@@ -182,9 +199,11 @@
     "noDiscount": "Chegirma qo'llanilmaydi"
   },
   "datetime": {
-    "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan.\n\nIltimos, hozirgi vaqtdan keyingi vaqtni tanlang.",
+    "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan yoki bron muddati tugagan.\n\nIltimos, mavjud to'liq soatlardan birini tanlang.",
     "invalidStart": "Boshlanish vaqti noto'g'ri",
-    "pastDate": "O'tib ketgan sanani tanlab bo'lmaydi"
+    "pastDate": "O'tib ketgan sanani tanlab bo'lmaydi",
+    "outsideHours": "❌ Xizmat 09:00 dan 02:00 gacha ishlaydi.\n\nFaqat shu oralijdagi to'liq soatlarni tanlang.",
+    "fullHourOnly": "❌ Faqat to'liq soatlar bron qilinadi (masalan 09:00, 10:00).\n\n30 daqiqalik intervallar o'chirilgan."
   },
   "maintenance": {
     "blocked": "🚧 Texnik ishlar olib borilmoqda. Yangi buyurtma vaqtincha qabul qilinmaydi."
@@ -203,7 +222,7 @@
     "pendingExists": "Kutilayotgan uzaytirish so'rovi allaqachon mavjud. Admin javobini kuting."
   },
   "notify": {
-    "accepted": "🚚 <b>Sizning buyurtmangizni kuryer qabul qildi.</b>\n\n👤 <b>Ismi:</b>\n{{name}}\n\n📞 <b>Telefon:</b>\n{{phone}}\n\n⏱ Taxminiy yetib borish: 30-60 daqiqa\n\nBuyurtma raqami: #{{id}}",
+    "accepted": "🚚 <b>Sizning buyurtmangizni kuryer qabul qildi.</b>\n\n👤 <b>Ismi:</b>\n{{name}}\n\n📞 <b>Telefon:</b>\n{{phone}}\n\n⏱ Taxminiy yetib borish: 1 soat ichida\n\nBuyurtma raqami: #{{id}}",
     "statusDefault": "📦 Buyurtma #{{id}}: {{status}}",
     "returned": "↩️ <b>PlayStation qaytarib olindi</b>\n\nBuyurtma: #{{id}}\nQurilma: {{unit}}\nRahmat! Xizmatimizdan foydalanganingiz uchun minnatdormiz.",
     "rejectedCourier": "❌ Buyurtmangiz (#{{id}}) kuryer tomonidan rad etildi.\n\nYangi buyurtma berishingiz mumkin.",

@@ -8,7 +8,7 @@ const logger = require("../../utils/logger");
 const rentalExtensionService = require("../../services/rentalExtension.service");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const userOrderHistoryService = require("../../services/userOrderHistory.service");
-const { ACTIVE_RENTAL_STATUSES } = require("../../constants/orderStatus");
+const { ACTIVE_RENTAL_STATUSES, LOCATION_UPDATABLE_STATUSES } = require("../../constants/orderStatus");
 const { t, resolveLang, languageKeyboard, matchMenuAction, normalizeLang } = require("../../i18n");
 const { formatDatetime } = require("../../utils/dateHelper");
 const {
@@ -18,8 +18,20 @@ const {
 const { STEPS: SUPPORT_STEPS } = require("../../constants/supportChat");
 const { wasMessageHandled } = require("../helpers/handledMessage");
 const { addCallbackHandler } = require("../events/callbackRouter");
+const orderLocationService = require("../../services/orderLocation.service");
+const locationUpdateHelper = require("../helpers/locationUpdate.helper");
 
-const USER_CALLBACK_PREFIXES = ["lang:", "console:", "rental:", "date:", "time:", "promo:", "extend:", "order:", "rate:"];
+const USER_CALLBACK_PREFIXES = [
+  "lang:",
+  "console:",
+  "rental:",
+  "date:",
+  "time:",
+  "promo:",
+  "extend:",
+  "order:",
+  "rate:",
+];
 
 function isUserCallback(data) {
   return USER_CALLBACK_PREFIXES.some((p) => data?.startsWith(p));
@@ -48,7 +60,6 @@ async function continueAfterLanguage(bot, chatId, user, fullName) {
 function register(bot) {
   registerUserSupportHandlers(bot);
 
-  // ---------- /start ----------
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -64,7 +75,6 @@ function register(bot) {
     await continueAfterLanguage(bot, chatId, user, fullName);
   });
 
-  // ---------- Telefon raqam qabul qilish (contact) ----------
   bot.on("contact", async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -80,33 +90,27 @@ function register(bot) {
     await bot.sendMessage(chatId, t("welcome.phoneSaved", L), userKeyboards.locationRequestKeyboard(L));
   });
 
-  // ---------- Lokatsiya qabul qilish ----------
   bot.on("location", async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id;
-    const session = sessionStore.getSession(chatId);
+    const session = sessionStore.getSession(msg.chat.id);
     if (session.step === SUPPORT_STEPS.USER_REPLY) {
       await handleUserSupportMessage(bot, msg);
       return;
     }
-    const { latitude, longitude } = msg.location;
-
-    const user = await userService.updateLocation(telegramId, {
-      latitude,
-      longitude,
-      address: `Lokatsiya: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
-    });
-    const L = resolveLang(user.language);
-    await bot.sendMessage(chatId, t("welcome.locationSaved", L), userKeyboards.mainMenuKeyboard(L));
+    await locationUpdateHelper.handleCustomerLocation(bot, msg);
   });
 
-  // ---------- Support chat (matn + media) ----------
+  bot.on("edited_message", async (msg) => {
+    if (!msg.location) return;
+    const session = sessionStore.getSession(msg.chat.id);
+    if (session.step === SUPPORT_STEPS.USER_REPLY) return;
+    await locationUpdateHelper.handleCustomerLocation(bot, msg);
+  });
+
   bot.on("message", async (msg) => {
     if (msg.contact || msg.location) return;
     if (await handleUserSupportMessage(bot, msg)) return;
   });
 
-  // ---------- Matnli xabarlar ----------
   bot.on("message", async (msg) => {
     if (!msg.text) return;
     if (msg.contact || msg.location) return;
@@ -141,6 +145,53 @@ function register(bot) {
       await userService.updateLocation(telegramId, { address: text, latitude: null, longitude: null });
       await bot.sendMessage(chatId, t("welcome.locationSaved", L), userKeyboards.mainMenuKeyboard(L));
       return;
+    }
+
+    if (
+      user &&
+      (session.step === locationUpdateHelper.STEPS.CHANGE_ADDRESS ||
+        session.step === locationUpdateHelper.STEPS.UPDATE_LOCATION)
+    ) {
+      const targetOrderId = Number(session.data?._locOrderId) || null;
+      try {
+        if (targetOrderId) {
+          const result = await orderLocationService.updateDeliveryLocation({
+            orderId: targetOrderId,
+            userId: user.id,
+            address: text,
+          });
+          sessionStore.clearSession(chatId);
+          const key = result.order.courierId ? "locationUpdate.saved" : "locationUpdate.savedNoCourier";
+          await bot.sendMessage(chatId, t(key, L, { id: result.order.id }), userKeyboards.mainMenuKeyboard(L));
+          return;
+        }
+
+        const updatable = await orderLocationService.listUpdatableOrders(user.id);
+        if (updatable.length) {
+          const result = await orderLocationService.updateDeliveryLocation({
+            orderId: updatable[0].id,
+            userId: user.id,
+            address: text,
+          });
+          sessionStore.clearSession(chatId);
+          const key = result.order.courierId ? "locationUpdate.saved" : "locationUpdate.savedNoCourier";
+          await bot.sendMessage(chatId, t(key, L, { id: result.order.id }), userKeyboards.mainMenuKeyboard(L));
+          return;
+        }
+
+        await userService.updateLocation(telegramId, { address: text, latitude: null, longitude: null });
+        sessionStore.clearSession(chatId);
+        await bot.sendMessage(chatId, t("locationUpdate.profileOnly", L), userKeyboards.mainMenuKeyboard(L));
+        return;
+      } catch (err) {
+        await bot.sendMessage(
+          chatId,
+          t("locationUpdate.fail", L, {
+            error: locationUpdateHelper.formatLocationError(err, L),
+          })
+        );
+        return;
+      }
     }
 
     const action = matchMenuAction(text);
@@ -192,10 +243,26 @@ function register(bot) {
             });
           }
         }
+        const updatable = orders.filter(
+          (o) => LOCATION_UPDATABLE_STATUSES.includes(o.status) && !o.paymentReceived
+        );
+        if (updatable.length === 1) {
+          await bot.sendMessage(
+            chatId,
+            t("locationUpdate.prompt", L, { id: updatable[0].id }),
+            userKeyboards.orderLocationActionKeyboard(updatable[0].id, L)
+          );
+        } else if (updatable.length > 1) {
+          await bot.sendMessage(
+            chatId,
+            t("locationUpdate.pickOrder", L),
+            userKeyboards.locationUpdatePickKeyboard(updatable, L)
+          );
+        }
         return;
       }
       case "changeAddress": {
-        await bot.sendMessage(chatId, t("changeAddress.prompt", L), userKeyboards.locationRequestKeyboard(L));
+        await locationUpdateHelper.promptChangeAddress(bot, chatId, user);
         return;
       }
       case "help": {
@@ -211,7 +278,6 @@ function register(bot) {
     }
   });
 
-  // ---------- Callback query'lar ----------
   addCallbackHandler("user", async (bot, query) => {
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
@@ -219,26 +285,45 @@ function register(bot) {
 
     if (!isUserCallback(data)) return false;
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     try {
       if (data.startsWith("lang:")) {
         const lang = normalizeLang(data.split(":")[1]);
-        if (!lang) {
-          await safeAnswerCallbackQuery(bot, query.id);
-          return true;
-        }
+        if (!lang) return true;
         const user = await userService.updateLanguage(telegramId, lang);
         const L = resolveLang(lang);
 
         try {
-          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-          });
+          await bot.editMessageReplyMarkup(
+            { inline_keyboard: [] },
+            { chat_id: chatId, message_id: query.message.message_id }
+          );
         } catch (_) {}
 
-        await safeAnswerCallbackQuery(bot, query.id, { text: t("lang.changed", L) });
         const fullName = [query.from.first_name, query.from.last_name].filter(Boolean).join(" ");
         await continueAfterLanguage(bot, chatId, user, fullName);
+        return true;
+      }
+
+      if (data.startsWith("order:loc:")) {
+        const orderId = Number(data.split(":")[2]);
+        const user = await userService.getUserByTelegramId(telegramId);
+        const L = resolveLang(user?.language);
+        if (!user || !Number.isFinite(orderId)) {
+          await bot.sendMessage(chatId, t("locationUpdate.notFound", L));
+          return true;
+        }
+        const order = await orderService.getOrderById(orderId);
+        if (!order || order.userId !== user.id) {
+          await bot.sendMessage(chatId, t("locationUpdate.forbidden", L));
+          return true;
+        }
+        if (!LOCATION_UPDATABLE_STATUSES.includes(order.status) || order.paymentReceived) {
+          await bot.sendMessage(chatId, t("locationUpdate.locked", L));
+          return true;
+        }
+        await locationUpdateHelper.promptUpdateForOrder(bot, chatId, order, L);
         return true;
       }
 
@@ -259,15 +344,11 @@ function register(bot) {
         const L = resolveLang(user?.language);
         const order = await orderService.getOrderById(orderId);
         if (!order || order.userId !== user?.id) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: t("extend.notFound", L) });
+          await bot.sendMessage(chatId, t("extend.notFound", L));
           return true;
         }
         if (!ACTIVE_RENTAL_STATUSES.includes(order.status)) {
-          await bot.sendMessage(
-            chatId,
-            t("extend.notActive", L, { status: order.status })
-          );
-          await safeAnswerCallbackQuery(bot, query.id);
+          await bot.sendMessage(chatId, t("extend.notActive", L, { status: order.status }));
           return true;
         }
         await bot.sendMessage(
@@ -311,10 +392,7 @@ function register(bot) {
           try {
             await bot.editMessageReplyMarkup(
               { inline_keyboard: [] },
-              {
-                chat_id: chatId,
-                message_id: query.message.message_id,
-              }
+              { chat_id: chatId, message_id: query.message.message_id }
             );
           } catch (_) {}
         } catch (err) {
@@ -334,20 +412,16 @@ function register(bot) {
         await orderScene.handleCancel(bot, chatId, query);
         return true;
       } else if (data === "order:noop") {
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       } else if (data.startsWith("rate:")) {
         const [, orderId, rating] = data.split(":");
         const { submitReview } = require("../handlers/reviewHelper");
         await submitReview(bot, chatId, telegramId, Number(orderId), Number(rating));
       }
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       logger.error("Callback query handler xatoligi", { context: "Bot", error: err.message });
       const user = await userService.getUserByTelegramId(telegramId).catch(() => null);
-      await safeAnswerCallbackQuery(bot, query.id, {
-        text: t("errors.callback", resolveLang(user?.language)),
-      });
+      await bot.sendMessage(chatId, t("errors.callback", resolveLang(user?.language)));
     }
     return true;
   });

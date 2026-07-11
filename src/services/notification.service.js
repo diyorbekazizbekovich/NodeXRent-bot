@@ -19,10 +19,40 @@ async function sendToTelegram(telegramId, text, options = {}) {
     });
     return true;
   } catch (err) {
-    logger.error("Xabar yuborishda xatolik", {
+    const msg = err.message || String(err);
+    const unreachable =
+      /chat not found|bot was blocked|user is deactivated|PEER_ID_INVALID|forbidden: bot/i.test(msg);
+    logger[unreachable ? "warn" : "error"]("Xabar yuborishda xatolik", {
       context: "NotificationService",
-      error: err.message,
+      error: msg,
       telegramId: String(telegramId),
+      unreachable: unreachable || undefined,
+    });
+    return false;
+  }
+}
+
+/**
+ * Native Telegram location pin (courier map updates without refresh).
+ */
+async function sendTelegramLocation(telegramId, latitude, longitude) {
+  if (!botInstance) {
+    logger.warn("Notification service: bot instance hali init qilinmagan");
+    return false;
+  }
+  if (latitude == null || longitude == null) return false;
+  try {
+    await botInstance.sendLocation(String(telegramId), Number(latitude), Number(longitude));
+    return true;
+  } catch (err) {
+    const msg = err.message || String(err);
+    const unreachable =
+      /chat not found|bot was blocked|user is deactivated|PEER_ID_INVALID|forbidden: bot/i.test(msg);
+    logger[unreachable ? "warn" : "error"]("Lokatsiya yuborishda xatolik", {
+      context: "NotificationService",
+      error: msg,
+      telegramId: String(telegramId),
+      unreachable: unreachable || undefined,
     });
     return false;
   }
@@ -41,6 +71,7 @@ const KNOWN_NOTIFICATION_TYPES = new Set([
   "COURIER_ASSIGNED",
   "ORDER_ARRIVED",
   "ADMIN_ORDER_ASSIGNED",
+  "LOCATION_UPDATED",
   "PROMO",
   "ADVERTISEMENT",
 ]);
@@ -78,4 +109,4 @@ async function notify({ orderId = null, type, recipientType, recipientTelegramId
   return sent;
 }
 
-module.exports = { initNotificationService, sendToTelegram, notify };
+module.exports = { initNotificationService, sendToTelegram, sendTelegramLocation, notify };

@@ -115,6 +115,7 @@ enum NotificationType {
   COURIER_ASSIGNED
   ORDER_ARRIVED
   ADMIN_ORDER_ASSIGNED
+  LOCATION_UPDATED
   PROMO
   ADVERTISEMENT
 }
@@ -387,14 +388,15 @@ model Order {
   returnNote      String?
   returnedAt      DateTime?
 
-  statusLogs    OrderStatusLog[]
-  review        Review?
-  notifications Notification[]
-  payments      OrderPayment[]
-  extensions    RentalExtension[]
-  orderItems    OrderInventoryItem[]
-  contract      RentalContract?
-  photos        OrderPhoto[]
+  statusLogs       OrderStatusLog[]
+  locationHistory  OrderLocationHistory[]
+  review           Review?
+  notifications    Notification[]
+  payments         OrderPayment[]
+  extensions       RentalExtension[]
+  orderItems       OrderInventoryItem[]
+  contract         RentalContract?
+  photos           OrderPhoto[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -403,6 +405,25 @@ model Order {
   @@index([status, endDatetime])
   @@index([paymentReceived])
   @@map("orders")
+}
+
+/// Yetkazib berish manzili o'zgarishlari tarixi (faqat eng so'nggisi Order da active)
+model OrderLocationHistory {
+  id               Int      @id @default(autoincrement())
+  orderId          Int
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId           Int
+  previousLatitude Float?
+  previousLongitude Float?
+  previousAddress  String?
+  newLatitude      Float?
+  newLongitude     Float?
+  newAddress       String?
+  createdAt        DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([userId, createdAt])
+  @@map("order_location_history")
 }
 
 model InventoryItem {

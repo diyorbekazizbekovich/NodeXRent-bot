@@ -51,7 +51,11 @@ async function createOrder({
         ? "datetime.pastTime"
         : timeValidation.code === "PAST_DATE"
           ? "datetime.pastDate"
-          : "datetime.invalidStart";
+          : timeValidation.code === "OUTSIDE_HOURS"
+            ? "datetime.outsideHours"
+            : timeValidation.code === "NOT_FULL_HOUR"
+              ? "datetime.fullHourOnly"
+              : "datetime.invalidStart";
     throw err;
   }
 

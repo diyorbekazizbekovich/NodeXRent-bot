@@ -6,10 +6,12 @@ const userService = require("../../services/user.service");
 const { quickDateOptions, formatDatetime, startOfDay, zonedDateTime } = require("../../utils/dateHelper");
 const { PricingError } = require("../../errors/pricing.errors");
 const { t, resolveLang } = require("../../i18n");
+const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const {
   combineDateAndTime,
   getAvailableTimeSlots,
   validateStartDatetime,
+  isOrderCreationOpen,
 } = require("../../validators/orderDatetime.validator");
 
 const STEPS = {
@@ -53,6 +55,11 @@ async function start(bot, chatId) {
     await maintenanceService.assertCanCreateOrder(false);
   } catch (err) {
     await bot.sendMessage(chatId, err.messageKey ? t(err.messageKey, L) : err.message);
+    return;
+  }
+
+  if (!isOrderCreationOpen()) {
+    await bot.sendMessage(chatId, t("order.outsideWorkingHours", L));
     return;
   }
 
@@ -177,7 +184,11 @@ async function handleTimeSelect(bot, chatId, time) {
         ? t("datetime.pastTime", L)
         : validation.code === "PAST_DATE"
           ? t("datetime.pastDate", L)
-          : t("datetime.invalidStart", L);
+          : validation.code === "OUTSIDE_HOURS"
+            ? t("datetime.outsideHours", L)
+            : validation.code === "NOT_FULL_HOUR"
+              ? t("datetime.fullHourOnly", L)
+              : t("datetime.invalidStart", L);
     await bot.sendMessage(chatId, msg);
     sessionStore.setStep(chatId, STEPS.TIME);
     await sendTimeSelection(bot, chatId, session.data.baseDate, L);
@@ -276,7 +287,11 @@ async function showConfirmation(bot, chatId) {
         ? t("datetime.pastTime", L)
         : validation.code === "PAST_DATE"
           ? t("datetime.pastDate", L)
-          : t("datetime.invalidStart", L);
+          : validation.code === "OUTSIDE_HOURS"
+            ? t("datetime.outsideHours", L)
+            : validation.code === "NOT_FULL_HOUR"
+              ? t("datetime.fullHourOnly", L)
+              : t("datetime.invalidStart", L);
     await bot.sendMessage(chatId, msg);
     sessionStore.setStep(chatId, STEPS.TIME);
     await sendTimeSelection(bot, chatId, session.data.baseDate || startDatetime, L);
@@ -344,7 +359,7 @@ async function handleConfirm(bot, chatId, user, query) {
   const session = sessionStore.getSession(chatId);
   if (session.step === STEPS.CONFIRMING) {
     if (query) {
-      await bot.answerCallbackQuery(query.id, { text: t("order.alreadyCreating", L) });
+      await safeAnswerCallbackQuery(bot, query.id, { text: t("order.alreadyCreating", L) });
     }
     return;
   }
@@ -363,6 +378,11 @@ async function handleConfirm(bot, chatId, user, query) {
 
   sessionStore.setStep(chatId, STEPS.CONFIRMING);
 
+  // Ack before createOrder (DB) — router may already have answered (idempotent)
+  if (query) {
+    await safeAnswerCallbackQuery(bot, query.id, { text: t("order.creating", L) });
+  }
+
   if (_confirmMessageId) {
     try {
       await bot.editMessageReplyMarkup(userKeyboards.loadingConfirmKeyboard(L).reply_markup, {
@@ -370,10 +390,6 @@ async function handleConfirm(bot, chatId, user, query) {
         message_id: _confirmMessageId,
       });
     } catch (_) {}
-  }
-
-  if (query) {
-    await bot.answerCallbackQuery(query.id, { text: t("order.creating", L) });
   }
 
   try {
@@ -423,9 +439,13 @@ async function handleCancel(bot, chatId, query) {
   const session = sessionStore.getSession(chatId);
   if (session.step === STEPS.CONFIRMING) {
     if (query) {
-      await bot.answerCallbackQuery(query.id, { text: t("order.cannotCancelCreating", L) });
+      await safeAnswerCallbackQuery(bot, query.id, { text: t("order.cannotCancelCreating", L) });
     }
     return;
+  }
+
+  if (query) {
+    await safeAnswerCallbackQuery(bot, query.id);
   }
 
   const { _confirmMessageId } = session.data || {};
@@ -442,9 +462,6 @@ async function handleCancel(bot, chatId, query) {
   }
 
   sessionStore.clearSession(chatId);
-  if (query) {
-    await bot.answerCallbackQuery(query.id);
-  }
   await bot.sendMessage(chatId, t("order.cancelled", L), userKeyboards.mainMenuKeyboard(L));
 }
 

@@ -34,8 +34,10 @@ function registerAdminCourierHandlers(bot, isAdmin) {
     const chatId = query.message.chat.id;
     const telegramId = query.from.id;
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId))) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -105,12 +107,10 @@ function registerAdminCourierHandlers(bot, isAdmin) {
         const prompts = { name: "Yangi ism:", phone: "Yangi telefon:", region: "Yangi hudud:" };
         await bot.sendMessage(chatId, prompts[field] || "Qiymat kiriting:");
       }
-
-      await safeAnswerCallbackQuery(bot, query.id);
     } catch (err) {
       const message = err.name === "CourierAdminError" ? err.message : "Xatolik yuz berdi";
       logger.error("Admin courier handler xatoligi", { context: "AdminCourier", error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: message });
+      await bot.sendMessage(chatId, message);
     }
     return true;
   });

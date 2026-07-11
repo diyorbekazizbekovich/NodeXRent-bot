@@ -86,8 +86,10 @@ function registerAdminFactoryResetHandlers(bot, isAdmin) {
     const action = parts[2];
     const token = parts[3];
 
+    await safeAnswerCallbackQuery(bot, query.id);
+
     if (!(await isAdmin(telegramId)) || !factoryResetService.isSuperAdmin(telegramId)) {
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Ruxsat yo'q." });
+      await bot.sendMessage(chatId, "Ruxsat yo'q.");
       return true;
     }
 
@@ -96,17 +98,15 @@ function registerAdminFactoryResetHandlers(bot, isAdmin) {
     try {
       if (action === "cancel") {
         if (token && session.data?._factoryToken && token !== session.data._factoryToken) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: "Eski so'rov." });
+          await bot.sendMessage(chatId, "Eski so'rov.");
           return true;
         }
         sessionStore.clearSession(chatId);
         await bot.sendMessage(chatId, "❌ Factory Reset bekor qilindi.");
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
 
       if (!assertToken(session, token)) {
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Noto'g'ri yoki muddati o'tgan." });
         await bot.sendMessage(
           chatId,
           "❗️ Xavfsizlik: so'rov yaroqsiz. «🗑 Bazani tozalash» orqali qaytadan boshlang."
@@ -125,13 +125,12 @@ function registerAdminFactoryResetHandlers(bot, isAdmin) {
             "Katta-kichik harflar ham tekshiriladi.",
           { parse_mode: "HTML" }
         );
-        await safeAnswerCallbackQuery(bot, query.id);
         return true;
       }
 
       if (action === "execute") {
         if (!session.data?._factoryPhraseOk) {
-          await safeAnswerCallbackQuery(bot, query.id, { text: "Avval tasdiq matnini kiriting." });
+          await bot.sendMessage(chatId, "Avval tasdiq matnini kiriting.");
           return true;
         }
 
@@ -144,7 +143,6 @@ function registerAdminFactoryResetHandlers(bot, isAdmin) {
           _factoryExecuting: true,
         });
 
-        await safeAnswerCallbackQuery(bot, query.id, { text: "Boshlanmoqda..." });
         await bot.sendMessage(chatId, "⏳ Database tozalanmoqda... Kutib turing.");
 
         const adminRecord = await prisma.admin.findUnique({
@@ -169,10 +167,10 @@ function registerAdminFactoryResetHandlers(bot, isAdmin) {
         return true;
       }
 
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Noma'lum amal." });
+      await bot.sendMessage(chatId, "Noma'lum amal.");
     } catch (err) {
       logger.error("Factory reset callback error", { error: err.message });
-      await safeAnswerCallbackQuery(bot, query.id, { text: "Xato" });
+      await bot.sendMessage(chatId, "Xato");
     }
     return true;
   });
