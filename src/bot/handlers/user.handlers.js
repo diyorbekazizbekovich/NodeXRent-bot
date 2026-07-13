@@ -20,6 +20,7 @@ const { wasMessageHandled } = require("../helpers/handledMessage");
 const { addCallbackHandler } = require("../events/callbackRouter");
 const orderLocationService = require("../../services/orderLocation.service");
 const locationUpdateHelper = require("../helpers/locationUpdate.helper");
+const geoFenceService = require("../../services/geoFence.service");
 
 const USER_CALLBACK_PREFIXES = [
   "lang:",
@@ -142,8 +143,7 @@ function register(bot) {
     const L = resolveLang(user?.language);
 
     if (user && !user.defaultAddress && !(user.latitude && user.longitude) && user.phone) {
-      await userService.updateLocation(telegramId, { address: text, latitude: null, longitude: null });
-      await bot.sendMessage(chatId, t("welcome.locationSaved", L), userKeyboards.mainMenuKeyboard(L));
+      await bot.sendMessage(chatId, t("geoFence.coordsRequired", L), userKeyboards.locationRequestKeyboard(L));
       return;
     }
 
@@ -179,7 +179,16 @@ function register(bot) {
           return;
         }
 
-        await userService.updateLocation(telegramId, { address: text, latitude: null, longitude: null });
+        // Text note only — keep existing GPS; delivery still requires in-zone pin
+        if (user.latitude == null || user.longitude == null) {
+          await bot.sendMessage(
+            chatId,
+            t("geoFence.coordsRequired", L),
+            userKeyboards.locationRequestKeyboard(L)
+          );
+          return;
+        }
+        await userService.updateLocation(telegramId, { address: text });
         sessionStore.clearSession(chatId);
         await bot.sendMessage(chatId, t("locationUpdate.profileOnly", L), userKeyboards.mainMenuKeyboard(L));
         return;
@@ -199,8 +208,20 @@ function register(bot) {
 
     switch (action) {
       case "order": {
-        if (!user || !user.phone || !(user.defaultAddress || (user.latitude && user.longitude))) {
+        if (!user || !user.phone) {
           await bot.sendMessage(chatId, t("welcome.needRegister", L));
+          return;
+        }
+        if (
+          user.latitude == null ||
+          user.longitude == null ||
+          !geoFenceService.canDeliverTo(user.latitude, user.longitude)
+        ) {
+          await bot.sendMessage(
+            chatId,
+            t("geoFence.coordsRequired", L),
+            userKeyboards.locationRequestKeyboard(L)
+          );
           return;
         }
         return orderScene.start(bot, chatId);
@@ -266,7 +287,7 @@ function register(bot) {
         return;
       }
       case "help": {
-        await bot.sendMessage(chatId, t("help.text", L), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, t("help.text", L), { parse_mode: "HTML" });
         return;
       }
       case "language": {

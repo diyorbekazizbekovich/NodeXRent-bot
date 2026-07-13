@@ -1,17 +1,21 @@
 const prisma = require("../config/prisma");
 const orderRepository = require("../repositories/order.repository");
-const { filterGroup } = require("../constants/orderStatus");
+const { filterGroup, USER_OPEN_ORDER_STATUSES } = require("../constants/orderStatus");
 const orderAssignmentService = require("./orderAssignment.service");
 const pricingService = require("./pricing.service");
 const settingsService = require("./settings.service");
 const deliveryZoneService = require("./deliveryZone.service");
 const paymentService = require("./payment.service");
 const customerRepository = require("../repositories/customer.repository");
+const geoFenceService = require("./geoFence.service");
+const { GeoFenceError } = require("../errors/geoFence.errors");
+const { ActiveOrderExistsError } = require("../errors/order.errors");
 const { addHours } = require("../utils/dateHelper");
 const { validateStartDatetime } = require("../validators/orderDatetime.validator");
 
 /**
  * Yangi buyurtma yaratadi va barcha admin/kuryerlarga xabar yuboradi.
+ * Bir foydalanuvchida bir vaqtda faqat bitta ochiq buyurtma bo'lishi mumkin (DB lock).
  */
 async function createOrder({
   userId,
@@ -24,6 +28,19 @@ async function createOrder({
   promocode,
   depositAmount = 0,
 }) {
+  // Hard backend geofence — Telegram / API cannot bypass
+  try {
+    geoFenceService.assertInsideServiceArea(userLat, userLon);
+  } catch (err) {
+    if (err instanceof GeoFenceError) {
+      const e = new Error(err.message);
+      e.messageKey = err.messageKey;
+      e.code = err.code;
+      throw e;
+    }
+    throw err;
+  }
+
   const rental = await pricingService.getRentalPriceById(rentalPriceId);
   if (!rental.isActive) {
     const err = new Error("Tanlangan ijara narxi endi mavjud emas");
@@ -75,13 +92,21 @@ async function createOrder({
       : "Manzil ko'rsatilmagan"); // stored value; UI uses i18n separately
 
   const order = await prisma.$transaction(async (tx) => {
+    // Serialize concurrent createOrder for the same user (race-safe)
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${Number(userId)} FOR UPDATE`;
+
+    const open = await orderRepository.findOpenOrderForUser(userId, USER_OPEN_ORDER_STATUSES, tx);
+    if (open) {
+      throw new ActiveOrderExistsError(open.id);
+    }
+
     const created = await tx.order.create({
       data: {
         userId,
         consoleType,
         address: resolvedAddress,
-        latitude: userLat,
-        longitude: userLon,
+        latitude: Number(userLat),
+        longitude: Number(userLon),
         rentalPriceId,
         promocodeId: promo ? promo.id : null,
         startDatetime: start,
@@ -121,6 +146,10 @@ async function createOrder({
   await orderAssignmentService.broadcastNewOrder(fullOrder);
 
   return { order: fullOrder, candidate: null };
+}
+
+async function getOpenOrderForUser(userId) {
+  return orderRepository.findOpenOrderForUser(userId, USER_OPEN_ORDER_STATUSES);
 }
 
 async function getOrderById(orderId) {
@@ -182,6 +211,7 @@ async function listOrdersByFilter(filterKey, options) {
 module.exports = {
   createOrder,
   getOrderById,
+  getOpenOrderForUser,
   changeStatus,
   listUserOrders,
   listCourierActiveOrders,

@@ -11,15 +11,11 @@ function startDashboardRefreshJob(bot, intervalMs = 30000) {
       if (subs.size === 0) return;
 
       try {
-        const [stats, alerts] = await Promise.all([
-          dashboardKpiService.getKpiStats(),
-          adminAlertService.getAdminAlerts(),
-        ]);
         const body =
-          adminAlertService.formatAlerts(alerts) +
+          (await adminAlertService.formatDashboardAlertsSection()) +
           "\n\n" +
-          dashboardKpiService.formatKpiDashboard(stats) +
-          "\n\n_🔄 Real-time (avto-yangilanish)_";
+          dashboardKpiService.formatKpiDashboard(await dashboardKpiService.getKpiStats()) +
+          "\n\n<i>🔄 Real-time (avto-yangilanish)</i>";
 
         for (const [chatId, { messageId }] of subs.entries()) {
           const enabled = await realtimeDashboardService.isEnabled(chatId);
@@ -32,10 +28,14 @@ function startDashboardRefreshJob(bot, intervalMs = 30000) {
             await bot.editMessageText(body, {
               chat_id: chatId,
               message_id: messageId,
-              parse_mode: "Markdown",
+              parse_mode: "HTML",
             });
           } catch (err) {
             if (err.message?.includes("message is not modified")) continue;
+            logger.warn("Dashboard refresh edit failed", {
+              chatId,
+              error: err.message,
+            });
             require("../stores/dashboardSubscriptionStore").unsubscribe(chatId);
           }
         }

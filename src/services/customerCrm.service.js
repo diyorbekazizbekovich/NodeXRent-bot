@@ -3,6 +3,7 @@ const auditLogService = require("./auditLog.service");
 const { label: ratingLabel } = require("../constants/customerRating");
 const { label: statusLabel } = require("../constants/orderStatus");
 const { formatDatetime, formatDate } = require("../utils/dateHelper");
+const { escapeHtml } = require("../utils/telegramFormat");
 
 function formatMoney(n) {
   return `${Math.round(Number(n)).toLocaleString("uz-UZ")} so'm`;
@@ -17,35 +18,37 @@ async function getCustomerProfile(userId) {
 
 function formatProfile({ user, stats }) {
   const lines = [
-    "👤 *Mijoz profili*",
+    "👤 <b>Mijoz profili</b>",
     "",
-    `*Ism:* ${user.fullName || "—"}`,
-    `*Telefon:* ${user.phone || "—"}`,
-    `*Telegram ID:* \`${user.telegramId}\``,
-    `*Username:* ${user.username ? "@" + user.username : "—"}`,
-    `*Ro'yxatdan o'tgan:* ${formatDate(user.createdAt)}`,
-    `*Oxirgi faollik:* ${user.lastActivityAt ? formatDatetime(user.lastActivityAt) : "—"}`,
+    `<b>Ism:</b> ${escapeHtml(user.fullName || "—")}`,
+    `<b>Telefon:</b> ${escapeHtml(user.phone || "—")}`,
+    `<b>Telegram ID:</b> <code>${escapeHtml(user.telegramId)}</code>`,
+    `<b>Username:</b> ${user.username ? "@" + escapeHtml(user.username) : "—"}`,
+    `<b>Ro'yxatdan o'tgan:</b> ${escapeHtml(formatDate(user.createdAt))}`,
+    `<b>Oxirgi faollik:</b> ${user.lastActivityAt ? escapeHtml(formatDatetime(user.lastActivityAt)) : "—"}`,
     "",
-    `*Jami buyurtmalar:* ${stats.totalOrders}`,
-    `*Jami sarflangan:* ${formatMoney(stats.totalSpent)}`,
-    `*Oxirgi buyurtma:* ${stats.lastOrderAt ? formatDatetime(stats.lastOrderAt) : "—"}`,
-    `*Faol ijaralar:* ${stats.activeRentals}`,
-    `*Bekor qilingan:* ${stats.cancelledOrders}`,
-    `*Reyting:* ${ratingLabel(user.customerRating)}`,
+    `<b>Jami buyurtmalar:</b> ${stats.totalOrders}`,
+    `<b>Jami sarflangan:</b> ${escapeHtml(formatMoney(stats.totalSpent))}`,
+    `<b>Oxirgi buyurtma:</b> ${stats.lastOrderAt ? escapeHtml(formatDatetime(stats.lastOrderAt)) : "—"}`,
+    `<b>Faol ijaralar:</b> ${stats.activeRentals}`,
+    `<b>Bekor qilingan:</b> ${stats.cancelledOrders}`,
+    `<b>Reyting:</b> ${escapeHtml(ratingLabel(user.customerRating))}`,
     "",
-    user.adminNotes ? `*Admin izohi:*\n${user.adminNotes}` : "*Admin izohi:* —",
+    user.adminNotes
+      ? `<b>Admin izohi:</b>\n${escapeHtml(user.adminNotes)}`
+      : "<b>Admin izohi:</b> —",
   ];
   return lines.join("\n");
 }
 
 function formatOrderHistory(user) {
-  const lines = ["📜 *Buyurtmalar tarixi*", ""];
+  const lines = ["📜 <b>Buyurtmalar tarixi</b>", ""];
   if (!user.orders.length) return lines.join("\n") + "Buyurtmalar yo'q.";
   for (const o of user.orders) {
     lines.push(
-      `#${o.id} | ${o.consoleType} | ${statusLabel(o.status)}`,
-      `  ${formatDatetime(o.createdAt)} | ${formatMoney(Number(o.totalPrice) + Number(o.deliveryFee))}`,
-      o.inventoryUnit ? `  Qurilma: ${o.inventoryUnit.unitCode}` : "",
+      `#${o.id} | ${escapeHtml(o.consoleType)} | ${escapeHtml(statusLabel(o.status))}`,
+      `  ${escapeHtml(formatDatetime(o.createdAt))} | ${escapeHtml(formatMoney(Number(o.totalPrice) + Number(o.deliveryFee)))}`,
+      o.inventoryUnit ? `  Qurilma: ${escapeHtml(o.inventoryUnit.unitCode)}` : "",
       ""
     );
   }

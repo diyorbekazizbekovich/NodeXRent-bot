@@ -11,7 +11,6 @@ const {
   combineDateAndTime,
   getAvailableTimeSlots,
   validateStartDatetime,
-  isOrderCreationOpen,
 } = require("../../validators/orderDatetime.validator");
 
 const STEPS = {
@@ -58,9 +57,13 @@ async function start(bot, chatId) {
     return;
   }
 
-  if (!isOrderCreationOpen()) {
-    await bot.sendMessage(chatId, t("order.outsideWorkingHours", L));
-    return;
+  const user = await userService.getUserByTelegramId(chatId);
+  if (user?.id) {
+    const open = await orderService.getOpenOrderForUser(user.id);
+    if (open) {
+      await bot.sendMessage(chatId, t("orderErrors.activeOrderExists", L));
+      return;
+    }
   }
 
   sessionStore.clearSession(chatId);
@@ -428,6 +431,29 @@ async function handleConfirm(bot, chatId, user, query) {
           message_id: _confirmMessageId,
         });
       } catch (_) {}
+    }
+    if (err.code === "ACTIVE_ORDER_EXISTS" || err.messageKey === "orderErrors.activeOrderExists") {
+      sessionStore.clearSession(chatId);
+      await bot.sendMessage(chatId, t("orderErrors.activeOrderExists", L), userKeyboards.mainMenuKeyboard(L));
+      return;
+    }
+    if (err.code === "OUTSIDE_SERVICE_AREA" || err.messageKey === "geoFence.outsideServiceArea") {
+      sessionStore.clearSession(chatId);
+      await bot.sendMessage(
+        chatId,
+        t("geoFence.outsideServiceArea", L),
+        userKeyboards.locationRequestKeyboard(L)
+      );
+      return;
+    }
+    if (err.code === "MISSING_COORDS" || err.messageKey === "geoFence.coordsRequired") {
+      sessionStore.clearSession(chatId);
+      await bot.sendMessage(
+        chatId,
+        t("geoFence.coordsRequired", L),
+        userKeyboards.locationRequestKeyboard(L)
+      );
+      return;
     }
     const errText = err.messageKey ? t(err.messageKey, L) : err.message;
     await bot.sendMessage(chatId, t("order.createFail", L, { error: errText }));

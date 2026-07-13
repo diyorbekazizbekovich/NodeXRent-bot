@@ -6,6 +6,7 @@ const { OrderLocationError } = require("../errors/orderLocation.errors");
 const orderLocationRepo = require("../repositories/orderLocation.repository");
 const userService = require("./user.service");
 const orderNotificationService = require("./orderNotification.service");
+const geoFenceService = require("./geoFence.service");
 
 const COOLDOWN_MS = Number(env.LOCATION_UPDATE_COOLDOWN_MS) || 30_000;
 
@@ -24,6 +25,14 @@ function validateCoordinates(latitude, longitude, { required = true } = {}) {
     throw new OrderLocationError("INVALID_LOCATION", "Lokatsiya chegaradan tashqari", {
       messageKey: "locationUpdate.invalid",
     });
+  }
+  try {
+    geoFenceService.assertInsideServiceArea(latitude, longitude);
+  } catch (err) {
+    if (err.name === "GeoFenceError") {
+      throw new OrderLocationError(err.code, err.message, { messageKey: err.messageKey });
+    }
+    throw err;
   }
 }
 
@@ -107,6 +116,15 @@ async function updateDeliveryLocation({
       throw new OrderLocationError("INVALID_LOCATION", "Avval lokatsiya yuboring", {
         messageKey: "locationUpdate.invalid",
       });
+    }
+
+    try {
+      geoFenceService.assertInsideServiceArea(nextLat, nextLon);
+    } catch (err) {
+      if (err.name === "GeoFenceError") {
+        throw new OrderLocationError(err.code, err.message, { messageKey: err.messageKey });
+      }
+      throw err;
     }
 
     const newAddress = buildAddress(nextLat, nextLon, address || order.address);

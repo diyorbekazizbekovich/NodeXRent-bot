@@ -51,8 +51,8 @@ function registerAdminBackupHandlers(bot, isAdmin) {
           const rows = list.map((b) => [
             { text: `📥 ${b.filename}`, callback_data: `admin:backup:download:${b.id}` },
           ]);
-          await bot.sendMessage(chatId, "📋 *Backup tarixi*", {
-            parse_mode: "Markdown",
+          await bot.sendMessage(chatId, "📋 <b>Backup tarixi</b>", {
+            parse_mode: "HTML",
             reply_markup: { inline_keyboard: rows },
           });
         }

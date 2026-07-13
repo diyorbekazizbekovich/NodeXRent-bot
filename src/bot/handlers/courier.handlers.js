@@ -12,6 +12,7 @@ const { OrderAssignmentError } = require("../../errors/order.errors");
 const handoverWizard = require("../scenes/handoverWizard");
 const returnWizard = require("../scenes/returnWizard");
 const { addCallbackHandler } = require("../events/callbackRouter");
+const { escapeHtml } = require("../../utils/telegramFormat");
 
 const CONSOLE_TYPES = ["PS3", "PS4", "PS5"];
 
@@ -200,7 +201,10 @@ function register(bot) {
       for (const order of dashboard.newOrders.slice(0, 5)) {
         await bot.sendMessage(chatId, orderNotificationService.buildOrderDetailsText(order), {
           parse_mode: "HTML",
-          ...courierKeyboards.newOrderKeyboard(order.id, order.latitude, order.longitude),
+          ...courierKeyboards.newOrderKeyboard(order.id, order.latitude, order.longitude, {
+            confirmAllowed: true,
+            highPriority: Boolean(order.isHighPriority),
+          }),
         });
       }
       return;
@@ -228,8 +232,8 @@ function register(bot) {
     if (text === "👤 Profil") {
       await bot.sendMessage(
         chatId,
-        `👤 *Profil*\n\nIsm: ${courier.fullName || "—"}\nTelefon: ${courier.phone || "—"}\nHudud: ${courier.region || "—"}`,
-        { parse_mode: "Markdown" }
+        `👤 <b>Profil</b>\n\nIsm: ${escapeHtml(courier.fullName || "—")}\nTelefon: ${escapeHtml(courier.phone || "—")}\nHudud: ${escapeHtml(courier.region || "—")}`,
+        { parse_mode: "HTML" }
       );
       return;
     }
@@ -297,16 +301,25 @@ function register(bot) {
       const [, action, orderIdRaw] = data.split(":");
       const orderId = Number(orderIdRaw);
 
-      if (action === "accept") {
+      if (action === "acceptBlocked") {
+        await bot.sendMessage(
+          chatId,
+          "⏳ Bu buyurtma hali admin tomonidan tasdiqlanmagan yoki muddati kelmagan."
+        );
+      } else if (action === "accept") {
         const order = await orderAssignmentService.acceptOrderByCourier(orderId, courier.id);
         await bot.sendMessage(
           chatId,
-          `✅ Buyurtma #${order.id} qabul qilindi.`,
-          courierKeyboards.onTheWayKeyboard(order.id)
+          `✅ Buyurtma #${order.id} qabul qilindi (COURIER_ASSIGNED).`,
+          courierKeyboards.assignedOrderKeyboard(order.id)
         );
+        await clearInlineKeyboard(bot, query);
       } else if (action === "reject") {
         await orderAssignmentService.rejectOrderByCourier(orderId, courier.id);
-        await bot.sendMessage(chatId, `❌ Buyurtma #${orderId} rad etildi. Mijoz va admin xabardor qilindi.`);
+        await bot.sendMessage(
+          chatId,
+          `❌ Buyurtma #${orderId} rad etildi.\nBoshqa kuryerlarga qayta yuboriladi (agar qolgan bo'lsa).`
+        );
         await clearInlineKeyboard(bot, query);
       } else if (action === "location") {
         const order = await orderService.getOrderById(orderId);

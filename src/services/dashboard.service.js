@@ -33,6 +33,7 @@ async function getDashboardStats() {
     todayCancelled,
     todayCompleted,
     activeRentals,
+    overdueRentals,
     totalOrders,
     inventoryByType,
     todayByConsole,
@@ -55,6 +56,17 @@ async function getDashboardStats() {
       where: { createdAt: { gte: todayStart, lte: todayEnd }, status: { in: ["COMPLETED", "RETURNED"] } },
     }),
     prisma.order.count({ where: { status: { in: ACTIVE_RENTAL_STATUSES } } }),
+    prisma.order.count({
+      where: {
+        OR: [
+          { status: "EXPIRED" },
+          {
+            status: { in: [...ACTIVE_RENTAL_STATUSES] },
+            endDatetime: { lt: now },
+          },
+        ],
+      },
+    }),
     prisma.order.count(),
     prisma.inventoryUnit.groupBy({
       by: ["consoleType", "status"],
@@ -78,6 +90,7 @@ async function getDashboardStats() {
       todayCancelled,
       todayCompleted,
       activeRentals,
+      overdueRentals,
       total: totalOrders,
     },
     playstations,
@@ -95,7 +108,7 @@ function buildConsoleStats(grouped) {
     const t = row.consoleType;
     if (!map[t]) map[t] = { total: 0, rented: 0, available: 0 };
     map[t].total += row._count._all;
-    if (row.status === "RENTED") map[t].rented += row._count._all;
+    if (row.status === "RENTED" || row.status === "RESERVED") map[t].rented += row._count._all;
     if (row.status === "AVAILABLE") map[t].available += row._count._all;
   }
   return map;
@@ -128,38 +141,40 @@ function formatMoney(n) {
 }
 
 function formatDashboard(stats) {
+  const { escapeHtml } = require("../utils/telegramFormat");
   const lines = [
-    "📊 *Admin Dashboard*",
+    "📊 <b>Admin Dashboard</b>",
     "",
-    "💰 *Daromad*",
-    `• Bugun: ${formatMoney(stats.revenue.today)}`,
-    `• 7 kun: ${formatMoney(stats.revenue.week)}`,
-    `• Oy: ${formatMoney(stats.revenue.month)}`,
-    `• Jami: ${formatMoney(stats.revenue.total)}`,
+    "💰 <b>Daromad</b>",
+    `• Bugun: ${escapeHtml(formatMoney(stats.revenue.today))}`,
+    `• 7 kun: ${escapeHtml(formatMoney(stats.revenue.week))}`,
+    `• Oy: ${escapeHtml(formatMoney(stats.revenue.month))}`,
+    `• Jami: ${escapeHtml(formatMoney(stats.revenue.total))}`,
     "",
-    "📦 *Buyurtmalar*",
+    "📦 <b>Buyurtmalar</b>",
     `• Bugun: ${stats.orders.today}`,
     `• Qabul qilingan: ${stats.orders.todayAccepted}`,
     `• Bekor: ${stats.orders.todayCancelled}`,
     `• Yakunlangan: ${stats.orders.todayCompleted}`,
     `• Faol ijaralar: ${stats.orders.activeRentals}`,
+    `• ⏰ Overdue: ${stats.orders.overdueRentals || 0}`,
     `• Jami: ${stats.orders.total}`,
     "",
-    "🎮 *PlayStation inventar*",
+    "🎮 <b>PlayStation inventar</b>",
   ];
   for (const t of ["PS3", "PS4", "PS5"]) {
     const ps = stats.playstations[t] || { total: 0, rented: 0, available: 0 };
-    lines.push(`*${t}* — Jami: ${ps.total} | Band: ${ps.rented} | Bo'sh: ${ps.available}`);
+    lines.push(`<b>${t}</b> — Jami: ${ps.total} | Band: ${ps.rented} | Bo'sh: ${ps.available}`);
   }
   return lines.join("\n");
 }
 
 function formatTodayBlock(stats) {
-  const lines = ["📅 *Bugungi statistika (model bo'yicha)*", ""];
+  const lines = ["📅 <b>Bugungi statistika (model bo'yicha)</b>", ""];
   for (const t of ["PS3", "PS4", "PS5"]) {
     const s = stats.todayByConsole[t];
     lines.push(
-      `*${t}*`,
+      `<b>${t}</b>`,
       `• Buyurtmalar: ${s.total}`,
       `• Qabul qilingan: ${s.accepted}`,
       `• Bekor: ${s.cancelled}`,

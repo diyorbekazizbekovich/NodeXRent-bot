@@ -4,6 +4,7 @@ const { getAdminRecipients } = require("../utils/adminRecipients");
 const prisma = require("../config/prisma");
 const logger = require("../utils/logger");
 const { formatDatetime } = require("../utils/dateHelper");
+const { escapeHtml } = require("../utils/telegramFormat");
 
 const HEADER =
   "━━━━━━━━━━━━━━\n📩 NodeXRent qo'llab-quvvatlash xizmati\n━━━━━━━━━━━━━━";
@@ -62,14 +63,16 @@ function formatCustomerReplyHeader(user) {
 
 function formatHistory(messages) {
   if (!messages.length) return "💬 Chat tarixi bo'sh.";
-  const lines = ["💬 *Chat tarixi* (oxirgi xabarlar)", ""];
+  const lines = ["💬 <b>Chat tarixi</b> (oxirgi xabarlar)", ""];
   for (const m of [...messages].reverse()) {
     const who = m.senderType === "ADMIN" ? "👨‍💼 Admin" : "👤 Mijoz";
     const body =
       m.messageType === "text"
-        ? (m.text || "").slice(0, 200)
-        : `[${m.messageType}]${m.caption ? " " + m.caption.slice(0, 120) : ""}`;
-    lines.push(`${who} · ${formatDatetime(m.createdAt)}`);
+        ? escapeHtml((m.text || "").slice(0, 200))
+        : escapeHtml(
+            `[${m.messageType}]${m.caption ? " " + m.caption.slice(0, 120) : ""}`
+          );
+    lines.push(`${who} · ${escapeHtml(formatDatetime(m.createdAt))}`);
     lines.push(body || "—");
     lines.push("");
   }

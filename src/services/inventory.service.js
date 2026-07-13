@@ -12,7 +12,7 @@ function buildCountsFromGrouped(grouped) {
   for (const row of grouped) {
     const t = row.consoleType;
     result[t].total += row._count._all;
-    if (row.status === "RENTED") result[t].rented += row._count._all;
+    if (row.status === "RENTED" || row.status === "RESERVED") result[t].rented += row._count._all;
     if (row.status === "AVAILABLE") result[t].available += row._count._all;
   }
   return result;
@@ -147,21 +147,24 @@ async function updateUnit(id, data, adminContext = {}) {
 
 function formatUnitDetail(unit) {
   if (!unit) return "Qurilma topilmadi.";
+  const { escapeHtml } = require("../utils/telegramFormat");
   const lines = [
-    `🏷 *${unit.unitCode}*`,
-    `Model: ${unit.consoleType}`,
-    `Holat: ${statusLabel(unit.status)}`,
-    `Sotib olingan: ${unit.purchasedAt ? formatDate(unit.purchasedAt) : "—"}`,
-    `Sotib olish narxi: ${unit.purchasePrice ? Number(unit.purchasePrice).toLocaleString() + " so'm" : "—"}`,
-    `Oxirgi servis: ${unit.lastServiceAt ? formatDate(unit.lastServiceAt) : "—"}`,
-    unit.adminNote ? `Izoh: ${unit.adminNote}` : "",
+    `🏷 <b>${escapeHtml(unit.unitCode)}</b>`,
+    `Model: ${escapeHtml(unit.consoleType)}`,
+    `Holat: ${escapeHtml(statusLabel(unit.status))}`,
+    `Sotib olingan: ${unit.purchasedAt ? escapeHtml(formatDate(unit.purchasedAt)) : "—"}`,
+    `Sotib olish narxi: ${unit.purchasePrice ? escapeHtml(Number(unit.purchasePrice).toLocaleString() + " so'm") : "—"}`,
+    `Oxirgi servis: ${unit.lastServiceAt ? escapeHtml(formatDate(unit.lastServiceAt)) : "—"}`,
+    unit.adminNote ? `Izoh: ${escapeHtml(unit.adminNote)}` : "",
     "",
-    "*Tarix:*",
+    "<b>Tarix:</b>",
   ];
   if (!unit.history?.length) lines.push("Tarix bo'sh.");
   else {
     for (const h of unit.history) {
-      lines.push(`• ${h.action} ${h.fromStatus ? statusLabel(h.fromStatus) + " → " : ""}${h.toStatus ? statusLabel(h.toStatus) : ""} (${formatDatetime(h.createdAt)})`);
+      lines.push(
+        `• ${escapeHtml(h.action)} ${h.fromStatus ? escapeHtml(statusLabel(h.fromStatus)) + " → " : ""}${h.toStatus ? escapeHtml(statusLabel(h.toStatus)) : ""} (${escapeHtml(formatDatetime(h.createdAt))})`
+      );
     }
   }
   return lines.filter(Boolean).join("\n");
@@ -169,65 +172,60 @@ function formatUnitDetail(unit) {
 
 async function assignUnitToOrder(orderId, consoleType) {
   return prisma.$transaction(async (tx) => {
-    const unit = await tx.inventoryUnit.findFirst({
+    const candidates = await tx.inventoryUnit.findMany({
       where: { consoleType, status: "AVAILABLE" },
       orderBy: { unitCode: "asc" },
+      take: 20,
     });
-    if (!unit) return null;
-    const fromStatus = unit.status;
-    await tx.inventoryUnit.update({
-      where: { id: unit.id },
-      data: { status: "RENTED" },
-    });
-    await tx.order.update({
-      where: { id: orderId },
-      data: { inventoryUnitId: unit.id },
-    });
-    await tx.inventoryUnitHistory.create({
-      data: {
-        inventoryUnitId: unit.id,
-        action: "ASSIGNED_TO_ORDER",
-        fromStatus,
-        toStatus: "RENTED",
-        orderId,
-        actorType: "system",
-      },
-    });
-    return unit;
+    if (!candidates.length) return null;
+
+    for (const unit of candidates) {
+      const locked = await tx.inventoryUnit.updateMany({
+        where: { id: unit.id, status: "AVAILABLE" },
+        data: { status: "RENTED" },
+      });
+      if (locked.count !== 1) continue;
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: { inventoryUnitId: unit.id },
+      });
+      await tx.inventoryUnitHistory.create({
+        data: {
+          inventoryUnitId: unit.id,
+          action: "ASSIGNED_TO_ORDER",
+          fromStatus: "AVAILABLE",
+          toStatus: "RENTED",
+          orderId,
+          actorType: "system",
+        },
+      });
+      return unit;
+    }
+    return null;
   });
 }
 
-async function releaseUnit(orderId) {
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { inventoryUnitId: true },
+async function releaseUnit(orderId, tx = null) {
+  const orderResourceService = require("./orderResource.service");
+  const client = tx || prisma;
+  const order = await client.order.findUnique({
+    where: { id: Number(orderId) },
+    include: orderResourceService.RELEASE_INCLUDE,
   });
-  if (!order?.inventoryUnitId) return;
-  const unit = await prisma.inventoryUnit.findUnique({ where: { id: order.inventoryUnitId } });
-  if (!unit) return;
-  await prisma.$transaction([
-    prisma.inventoryUnit.update({
-      where: { id: order.inventoryUnitId },
-      data: { status: "AVAILABLE" },
-    }),
-    prisma.inventoryUnitHistory.create({
-      data: {
-        inventoryUnitId: unit.id,
-        action: "RELEASED_FROM_ORDER",
-        fromStatus: unit.status,
-        toStatus: "AVAILABLE",
-        orderId,
-        actorType: "system",
-      },
-    }),
-  ]);
+  if (!order) return;
+  await orderResourceService.releaseOrderResources(client, order, {
+    reason: "RELEASE_UNIT",
+    releaseItems: false,
+  });
 }
+
 
 function formatInventoryMenu(counts) {
-  const lines = ["🎮 *PlayStation inventar boshqaruvi*", ""];
+  const lines = ["🎮 <b>PlayStation inventar boshqaruvi</b>", ""];
   for (const t of ["PS3", "PS4", "PS5"]) {
     const c = counts[t];
-    lines.push(`*${t}* — Jami: ${c.total} | Band: ${c.rented} | Bo'sh: ${c.available}`);
+    lines.push(`<b>${t}</b> — Jami: ${c.total} | Band: ${c.rented} | Bo'sh: ${c.available}`);
   }
   lines.push("", "Sonni o'zgartirish uchun modelni tanlang.");
   return lines.join("\n");

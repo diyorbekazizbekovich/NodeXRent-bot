@@ -8,9 +8,9 @@
   },
   "welcome": {
     "hello": "Assalomu alaykum, {{name}}! 👋\n\nPlayStation ijara botiga xush kelibsiz.\nDavom etish uchun telefon raqamingizni yuboring:",
-    "askLocation": "📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
+    "askLocation": "📍 Endi Telegram orqali lokatsiyangizni yuboring (Toshkent shahri ichida):",
     "mainMenu": "🏠 Asosiy menyu:",
-    "phoneSaved": "✅ Telefon raqamingiz saqlandi.\n\n📍 Endi manzilingizni yozing yoki lokatsiyangizni yuboring:",
+    "phoneSaved": "✅ Telefon raqamingiz saqlandi.\n\n📍 Endi Telegram orqali lokatsiyangizni yuboring (Toshkent shahri ichida):",
     "locationSaved": "✅ Manzilingiz saqlandi.\n\n🏠 Asosiy menyu:",
     "needRegister": "Iltimos avval /start orqali ro'yxatdan o'ting.",
     "userNotFound": "❗️ Foydalanuvchi topilmadi. /start buyrug'ini yuboring."
@@ -26,7 +26,7 @@
     "shareLocation": "📍 Lokatsiyani yuborish"
   },
   "help": {
-    "text": "📞 *Qo'llab-quvvatlash*\n\n+998 50 024 7999"
+    "text": "📞 <b>Qo'llab-quvvatlash</b>\n\n+998 50 024 7999"
   },
   "support": {
     "askReply": "Iltimos, javobingizni yuboring.",
@@ -57,7 +57,6 @@
     "pastDate": "❗️ O'tib ketgan sanani tanlab bo'lmaydi. Bugun yoki kelajak sanani kiriting.",
     "chooseTime": "🕒 Boshlanish vaqtini tanlang (faqat to'liq soatlar):",
     "noTimesToday": "❗️ Bu sana uchun mavjud vaqtlar tugagan. Boshqa sanani tanlang yoki ertangi kunni tanlang.",
-    "outsideWorkingHours": "🌙 Hozir buyurtma qabul qilinmaydi.\n\n⏱ Xizmat ish vaqti: <b>09:00 dan 02:00 gacha</b>.\n\nIltimos, ish vaqtida qayta urinib ko'ring.",
     "badTime": "❗️ Vaqt noto'g'ri. Faqat to'liq soatlarni tanlang (masalan 10:00).",
     "needDateFirst": "❗️ Avval sanani tanlang.",
     "pastTime": "❌ Siz tanlagan vaqt allaqachon o'tib ketgan.\n\nIltimos, hozirgi vaqtdan keyingi vaqtni tanlang.",
@@ -139,18 +138,19 @@
     "remainingDetail": "⏱ Qolgan vaqt: {{time}}"
   },
   "status": {
-    "PENDING": "Kutilmoqda",
-    "COURIER_ASSIGNED": "Tasdiqlandi",
-    "ACCEPTED": "Tasdiqlandi",
+    "PENDING": "Admin tasdig'ini kutmoqda",
+    "ADMIN_CONFIRMED": "Admin tasdiqlagan",
+    "COURIER_ASSIGNED": "Kuryer biriktirildi",
+    "ACCEPTED": "Tasdiqlangan (eski)",
     "ON_THE_WAY": "Yo'lda",
-    "ARRIVED": "Faol ijara",
-    "DELIVERED": "Faol ijara",
-    "RETURN_REQUESTED": "Faol ijara",
-    "RETURNED": "Tugallandi",
+    "ARRIVED": "Yetib keldi",
+    "DELIVERED": "Yetkazib berilgan",
+    "RETURN_REQUESTED": "Qaytarish so'raldi",
+    "RETURNED": "Qaytarib olindi",
     "COMPLETED": "Tugallandi",
     "CANCELLED": "Bekor qilindi",
     "REJECTED": "Rad etildi",
-    "EXPIRED": "Tugallandi",
+    "EXPIRED": "Muddati o'tgan",
     "EXTENDED": "Uzaytirildi",
     "ACTIVE": "Faol ijara"
   },
@@ -175,6 +175,11 @@
     "rateLimited": "⏳ Juda tez-tez yangilanmoqda. {{sec}} soniyadan keyin qayta urinib ko'ring.",
     "fail": "❗️ Manzilni yangilab bo'lmadi: {{error}}",
     "noneOpen": "Hozircha yetkazib berilayotgan buyurtma yo'q. Faqat profilingizdagi manzil yangilanadi."
+  },
+  "geoFence": {
+    "outsideServiceArea": "❌ Kechirasiz, hozircha xizmatimiz faqat Toshkent shahri hududida mavjud. Iltimos, Toshkent shahri ichidagi manzilni yuboring.",
+    "coordsRequired": "📍 Buyurtma uchun Toshkent shahri ichidagi Telegram lokatsiyasini yuboring.",
+    "unknownZone": "Noma'lum yetkazib berish zonasi."
   },
   "errors": {
     "generic": "Xatolik yuz berdi, qaytadan urinib ko'ring.",
@@ -208,11 +213,15 @@
   "maintenance": {
     "blocked": "🚧 Texnik ishlar olib borilmoqda. Yangi buyurtma vaqtincha qabul qilinmaydi."
   },
+  "orderConfirm": {
+    "tooEarly": "⏳ Ushbu buyurtmani hali tasdiqlab bo'lmaydi."
+  },
   "orderErrors": {
     "priceGone": "Tanlangan ijara narxi endi mavjud emas",
     "priceMismatch": "Tanlangan narx konsol turiga mos kelmaydi",
     "consoleGone": "Tanlangan konsol hozir mavjud emas",
-    "noAddress": "Manzil ko'rsatilmagan"
+    "noAddress": "Manzil ko'rsatilmagan",
+    "activeOrderExists": "❌ Sizda hali yakunlanmagan buyurtma mavjud. Yangi buyurtma berishdan oldin mavjud buyurtmangizni yakunlang yoki bekor qiling."
   },
   "extendErrors": {
     "badHours": "Faqat 1/2/3 kun (24/48/72 soat) uzaytirish mumkin",
@@ -228,8 +237,8 @@
     "rejectedCourier": "❌ Buyurtmangiz (#{{id}}) kuryer tomonidan rad etildi.\n\nYangi buyurtma berishingiz mumkin.",
     "rejectedAdmin": "❌ Buyurtmangiz (#{{id}}) admin tomonidan rad etildi.\n\nSavollar bo'lsa qo'llab-quvvatlashga yozing.",
     "cancelled": "❌ Buyurtmangiz (#{{id}}) bekor qilindi.",
-    "onTheWay": "📦 Buyurtma #{{id}}: Kuryer yo'lga chiqdi",
-    "arrived": "📦 Buyurtma #{{id}}: Kuryer yetib keldi",
+    "onTheWay": "🚚 Kuryer siz tomonga yo'lga chiqdi.\n\nBuyurtma: #{{id}}",
+    "arrived": "📍 Kuryer yetib keldi.\n\nBuyurtma: #{{id}}",
     "delivered": "📦 Buyurtma #{{id}}: Yetkazib berildi",
     "returnRequested": "📦 Buyurtma #{{id}}: Qaytarish so'raldi",
     "extApproved": "✅ Ijara uzaytirildi\n\nBuyurtma #{{id}}\nQo'shimcha: {{duration}}\nYangi tugash: {{newEnd}}\nQo'shimcha to'lov: {{price}}",

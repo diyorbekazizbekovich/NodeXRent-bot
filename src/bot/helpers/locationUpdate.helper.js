@@ -2,6 +2,8 @@ const sessionStore = require("../sessionStore");
 const userService = require("../../services/user.service");
 const orderLocationService = require("../../services/orderLocation.service");
 const { OrderLocationError } = require("../../errors/orderLocation.errors");
+const { GeoFenceError } = require("../../errors/geoFence.errors");
+const geoFenceService = require("../../services/geoFence.service");
 const userKeyboards = require("../keyboards/user.keyboards");
 const logger = require("../../utils/logger");
 const { t, resolveLang } = require("../../i18n");
@@ -66,12 +68,21 @@ async function promptChangeAddress(bot, chatId, user) {
 }
 
 function formatLocationError(err, L) {
+  if (err instanceof GeoFenceError || err?.code === "OUTSIDE_SERVICE_AREA") {
+    return t("geoFence.outsideServiceArea", L);
+  }
   if (err instanceof OrderLocationError) {
     if (err.code === "RATE_LIMITED") {
       return t("locationUpdate.rateLimited", L, { sec: err.retryAfterSec || 30 });
     }
+    if (err.code === "OUTSIDE_SERVICE_AREA" || err.messageKey === "geoFence.outsideServiceArea") {
+      return t("geoFence.outsideServiceArea", L);
+    }
     if (err.messageKey) return t(err.messageKey, L);
     return err.message;
+  }
+  if (err?.messageKey === "geoFence.outsideServiceArea" || err?.messageKey === "geoFence.coordsRequired") {
+    return t(err.messageKey, L);
   }
   return err.message || t("errors.generic", L);
 }
@@ -92,6 +103,22 @@ async function handleCustomerLocation(bot, msg) {
 
   if (!user) {
     await bot.sendMessage(chatId, t("welcome.userNotFound", L));
+    return true;
+  }
+
+  // Geofence first — do not save / continue order outside Tashkent
+  if (!geoFenceService.canDeliverTo(loc.latitude, loc.longitude)) {
+    logger.info("Customer location outside service area", {
+      context: "LocationHandler",
+      telegramId,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+    });
+    await bot.sendMessage(
+      chatId,
+      t("geoFence.outsideServiceArea", L),
+      userKeyboards.locationRequestKeyboard(L)
+    );
     return true;
   }
 
@@ -116,7 +143,6 @@ async function handleCustomerLocation(bot, msg) {
       return true;
     }
 
-    // Auto: open pre-delivery order → update latest active delivery location
     const updatable = await orderLocationService.listUpdatableOrders(user.id);
     if (updatable.length > 0) {
       const result = await orderLocationService.updateDeliveryLocation({
@@ -134,7 +160,6 @@ async function handleCustomerLocation(bot, msg) {
       return true;
     }
 
-    // Profile-only (registration / changeAddress without open delivery)
     await userService.updateLocation(telegramId, {
       latitude: loc.latitude,
       longitude: loc.longitude,
@@ -150,11 +175,11 @@ async function handleCustomerLocation(bot, msg) {
       code: err.code,
       telegramId,
     });
-    await bot.sendMessage(
-      chatId,
-      t("locationUpdate.fail", L, { error: formatLocationError(err, L) }),
-      userKeyboards.mainMenuKeyboard(L)
-    );
+    const text =
+      err instanceof GeoFenceError || err?.messageKey?.startsWith("geoFence.")
+        ? t(err.messageKey || "geoFence.outsideServiceArea", L)
+        : t("locationUpdate.fail", L, { error: formatLocationError(err, L) });
+    await bot.sendMessage(chatId, text, userKeyboards.locationRequestKeyboard(L));
     return true;
   }
 }

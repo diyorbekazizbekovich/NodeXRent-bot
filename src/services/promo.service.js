@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const auditLogService = require("./auditLog.service");
+const { escapeHtml } = require("../utils/telegramFormat");
 
 function normalizeCode(code) {
   return String(code || "").trim().toUpperCase();
@@ -201,16 +202,16 @@ function formatPromoDetails(p) {
       ? `${Number(p.discountAmount || 0).toLocaleString()} so'm`
       : `${p.discountPercent}%`;
   return (
-    `🏷️ <b>${p.code}</b>\n\n` +
+    `🏷️ <b>${escapeHtml(p.code)}</b>\n\n` +
     `Holat: ${p.isActive ? "✅ Faol" : "❌ Nofaol"}\n` +
-    `Chegirma: ${type}\n` +
+    `Chegirma: ${escapeHtml(type)}\n` +
     `Limit: ${p.usedCount}/${p.usageLimit}\n` +
     `Per-user: ${p.perUserLimit}\n` +
     `Muddat: ${p.expiresAt.toISOString().slice(0, 10)}\n` +
     (p.minOrderAmount != null
       ? `Min buyurtma: ${Number(p.minOrderAmount).toLocaleString()} so'm\n`
       : "") +
-    (p.description ? `Izoh: ${p.description}\n` : "")
+    (p.description ? `Izoh: ${escapeHtml(p.description)}\n` : "")
   );
 }
 
@@ -251,7 +252,7 @@ function formatPromoLine(p) {
     p.discountType === "FIXED"
       ? `${Number(p.discountAmount).toLocaleString()} so'm`
       : `${p.discountPercent}%`;
-  return `${p.isActive ? "✅" : "❌"} ${p.code} — ${type} | ${p.usedCount}/${p.usageLimit} | ${p.expiresAt.toISOString().slice(0, 10)}`;
+  return `${p.isActive ? "✅" : "❌"} ${escapeHtml(p.code)} — ${escapeHtml(type)} | ${p.usedCount}/${p.usageLimit} | ${p.expiresAt.toISOString().slice(0, 10)}`;
 }
 
 module.exports = {

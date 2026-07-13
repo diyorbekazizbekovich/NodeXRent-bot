@@ -54,21 +54,25 @@ async function getTopCouriers(limit = 10) {
 }
 
 function formatCourierStats(stats) {
+  const { escapeHtml } = require("../utils/telegramFormat");
   return (
-    `🚚 *Kuryer statistikasi*\n\n` +
-    `👤 ${stats.courier?.fullName || "—"}\n` +
+    `🚚 <b>Kuryer statistikasi</b>\n\n` +
+    `👤 ${escapeHtml(stats.courier?.fullName || "—")}\n` +
     `⭐ Reyting: ${stats.rating.toFixed(1)}\n\n` +
     `• Bugun: ${stats.todayDeliveries}\n` +
     `• Oy: ${stats.monthDeliveries}\n` +
     `• Jami: ${stats.totalDeliveries}\n` +
-    `• Topgan puli: ${stats.earnings.toLocaleString()} so'm`
+    `• Topgan puli: ${escapeHtml(stats.earnings.toLocaleString())} so'm`
   );
 }
 
 function formatTopCouriers(list) {
-  const lines = ["🏆 *Eng faol kuryerlar*", ""];
+  const { escapeHtml } = require("../utils/telegramFormat");
+  const lines = ["🏆 <b>Eng faol kuryerlar</b>", ""];
   list.forEach((item, i) => {
-    lines.push(`${i + 1}. ${item.courier?.fullName || "—"} — ${item.deliveries} ta (⭐ ${item.rating.toFixed(1)})`);
+    lines.push(
+      `${i + 1}. ${escapeHtml(item.courier?.fullName || "—")} — ${item.deliveries} ta (⭐ ${item.rating.toFixed(1)})`
+    );
   });
   return lines.join("\n");
 }

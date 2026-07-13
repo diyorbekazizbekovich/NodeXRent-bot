@@ -1,5 +1,11 @@
 const prisma = require("../config/prisma");
 const logger = require("../utils/logger");
+const {
+  messagePreview,
+  utf8ByteLength,
+  parseEntityByteOffset,
+  snippetAroundByteOffset,
+} = require("../utils/telegramFormat");
 
 let botInstance = null;
 
@@ -7,26 +13,52 @@ function initNotificationService(bot) {
   botInstance = bot;
 }
 
+function buildOutboundLog(telegramId, text, options, error) {
+  const parseMode = options?.parse_mode || "HTML";
+  const body = text != null ? String(text) : "";
+  const log = {
+    context: "NotificationService",
+    function: "sendToTelegram",
+    chatId: String(telegramId),
+    parse_mode: parseMode,
+    textLength: body.length,
+    utf8Bytes: utf8ByteLength(body),
+    preview: messagePreview(body, 300),
+  };
+  if (error) {
+    const offset = parseEntityByteOffset(error.message || error);
+    log.error = error.message || String(error);
+    if (offset != null) {
+      log.entityByteOffset = offset;
+      log.entitySnippet = snippetAroundByteOffset(body, offset);
+    }
+  }
+  return log;
+}
+
 async function sendToTelegram(telegramId, text, options = {}) {
   if (!botInstance) {
     logger.warn("Notification service: bot instance hali init qilinmagan");
     return false;
   }
+
+  const merged = {
+    parse_mode: "HTML",
+    ...options,
+  };
+
   try {
-    await botInstance.sendMessage(String(telegramId), text, {
-      parse_mode: "HTML",
-      ...options,
-    });
+    await botInstance.sendMessage(String(telegramId), text, merged);
     return true;
   } catch (err) {
     const msg = err.message || String(err);
     const unreachable =
       /chat not found|bot was blocked|user is deactivated|PEER_ID_INVALID|forbidden: bot/i.test(msg);
+    const isParse = /can't parse entities|parse entities|unsupported start tag/i.test(msg);
     logger[unreachable ? "warn" : "error"]("Xabar yuborishda xatolik", {
-      context: "NotificationService",
-      error: msg,
-      telegramId: String(telegramId),
+      ...buildOutboundLog(telegramId, text, merged, err),
       unreachable: unreachable || undefined,
+      parseError: isParse || undefined,
     });
     return false;
   }
@@ -73,7 +105,9 @@ const KNOWN_NOTIFICATION_TYPES = new Set([
   "ADMIN_ORDER_ASSIGNED",
   "LOCATION_UPDATED",
   "PROMO",
-  "ADVERTISEMENT",
+  "ORDER_CONFIRM_READY",
+  "ORDER_PRIORITY_REMINDER",
+  "ORDER_START_REMINDER",
 ]);
 
 async function persistNotification({ orderId, type, recipientType, recipientId, isSent }) {

@@ -1,12 +1,16 @@
 const OrderStatus = {
   PENDING: "PENDING",
+  ADMIN_CONFIRMED: "ADMIN_CONFIRMED",
   COURIER_ASSIGNED: "COURIER_ASSIGNED",
+  /** @deprecated Prefer ADMIN_CONFIRMED; kept for legacy rows */
   ACCEPTED: "ACCEPTED",
   REJECTED: "REJECTED",
   ON_THE_WAY: "ON_THE_WAY",
   ARRIVED: "ARRIVED",
   DELIVERED: "DELIVERED",
+  /** Product term: ACTIVE_RENTAL */
   ACTIVE: "ACTIVE",
+  ACTIVE_RENTAL: "ACTIVE",
   RETURN_REQUESTED: "RETURN_REQUESTED",
   RETURNED: "RETURNED",
   COMPLETED: "COMPLETED",
@@ -15,9 +19,10 @@ const OrderStatus = {
 };
 
 const STATUS_LABELS_UZ = {
-  PENDING: "Kutilayotgan",
+  PENDING: "Kutilayotgan (admin)",
+  ADMIN_CONFIRMED: "Admin tasdiqlagan — kuryer navbati",
   COURIER_ASSIGNED: "Kuryer biriktirildi",
-  ACCEPTED: "Qabul qilingan",
+  ACCEPTED: "Qabul qilingan (eski)",
   REJECTED: "Rad etilgan",
   ON_THE_WAY: "Yo'lda",
   ARRIVED: "Yetib keldi",
@@ -33,9 +38,14 @@ const STATUS_LABELS_UZ = {
 const ADMIN_FILTER_GROUPS = [
   { key: "PENDING", label: "Kutilayotgan", statuses: ["PENDING"] },
   {
+    key: "ADMIN_CONFIRMED",
+    label: "Admin tasdiqlagan",
+    statuses: ["ADMIN_CONFIRMED", "ACCEPTED"],
+  },
+  {
     key: "ACCEPTED",
-    label: "Qabul qilingan",
-    statuses: ["COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED"],
+    label: "Kuryerda",
+    statuses: ["COURIER_ASSIGNED", "ON_THE_WAY", "ARRIVED"],
   },
   { key: "DELIVERED", label: "Yetkazib berilgan", statuses: ["DELIVERED", "ACTIVE"] },
   {
@@ -53,11 +63,34 @@ const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED", "ACTIVE"];
 const ACTIVE_RENTAL_STATUSES = ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"];
 
 /**
+ * Foydalanuvchida yangi buyurtma yaratishni bloklovchi ochiq statuslar.
+ */
+const USER_OPEN_ORDER_STATUSES = [
+  OrderStatus.PENDING,
+  OrderStatus.ADMIN_CONFIRMED,
+  OrderStatus.COURIER_ASSIGNED,
+  OrderStatus.ACCEPTED,
+  OrderStatus.ON_THE_WAY,
+  OrderStatus.ARRIVED,
+  OrderStatus.DELIVERED,
+  OrderStatus.ACTIVE,
+  OrderStatus.RETURN_REQUESTED,
+];
+
+/** Qurilma/inventar bo'shatilishi kerak bo'lgan yakuniy statuslar */
+const RESOURCE_RELEASE_STATUSES = [
+  OrderStatus.CANCELLED,
+  OrderStatus.REJECTED,
+  OrderStatus.RETURNED,
+  OrderStatus.COMPLETED,
+];
+
+/**
  * Mijoz yetkazib berish manzilini yangilashi mumkin bo'lgan statuslar.
- * DELIVERED va undan keyin — taqiqlanadi.
  */
 const LOCATION_UPDATABLE_STATUSES = [
   OrderStatus.PENDING,
+  OrderStatus.ADMIN_CONFIRMED,
   OrderStatus.COURIER_ASSIGNED,
   OrderStatus.ACCEPTED,
   OrderStatus.ON_THE_WAY,
@@ -66,8 +99,9 @@ const LOCATION_UPDATABLE_STATUSES = [
 
 const TIMELINE_LABELS = {
   PENDING: "Buyurtma yaratildi",
-  COURIER_ASSIGNED: "Kuryer biriktirildi",
-  ACCEPTED: "Kuryer qabul qildi",
+  ADMIN_CONFIRMED: "Admin tasdiqladi — kuryerlarga yuborildi",
+  COURIER_ASSIGNED: "Kuryer qabul qildi",
+  ACCEPTED: "Admin tasdiqladi (eski)",
   ON_THE_WAY: "Kuryer yo'lga chiqdi",
   ARRIVED: "Kuryer yetib keldi",
   DELIVERED: "Yetkazildi",
@@ -94,6 +128,8 @@ module.exports = {
   ADMIN_FILTER_GROUPS,
   REVENUE_STATUSES,
   ACTIVE_RENTAL_STATUSES,
+  USER_OPEN_ORDER_STATUSES,
+  RESOURCE_RELEASE_STATUSES,
   LOCATION_UPDATABLE_STATUSES,
   TIMELINE_LABELS,
   label,

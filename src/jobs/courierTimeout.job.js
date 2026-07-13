@@ -2,12 +2,13 @@ const cron = require("node-cron");
 const prisma = require("../config/prisma");
 const env = require("../config/env");
 const logger = require("../utils/logger");
-const { getAdminRecipients } = require("../utils/adminRecipients");
-const { notify } = require("../services/notification.service");
+const orderAssignmentService = require("../services/orderAssignment.service");
+const { OrderStatus } = require("../constants/orderStatus");
 const { startOnce } = require("./jobGuard");
 
 /**
- * PENDING holatida uzoq qolgan va hech qaysi kuryer qabul qilmagan buyurtmalar haqida adminlarga ogohlantirish.
+ * ADMIN_CONFIRMED poolda kuryer javob bermasa — timeout.
+ * PENDING admin tasdig'ini kutadi (bu job bekor qilmaydi).
  */
 function startCourierTimeoutJob() {
   startOnce("courierTimeout", () => {
@@ -19,30 +20,30 @@ function startCourierTimeoutJob() {
 
         const stuckOrders = await prisma.order.findMany({
           where: {
-            status: "PENDING",
+            status: { in: [OrderStatus.ADMIN_CONFIRMED, OrderStatus.ACCEPTED] },
             courierId: null,
-            createdAt: { lt: timeoutThreshold },
+            confirmedAt: { lt: timeoutThreshold },
           },
+          select: { id: true, confirmedAt: true, createdAt: true },
         });
 
         if (stuckOrders.length === 0) return;
 
-        const admins = await getAdminRecipients();
-
         for (const order of stuckOrders) {
-          for (const admin of admins) {
-            await notify({
-              orderId: order.id,
-              type: "ORDER_CREATED",
-              recipientType: "admin",
-              recipientTelegramId: String(admin.telegramId),
-              recipientId: admin.recipientId,
-              text: `⏰ Buyurtma #${order.id} ${env.COURIER_RESPONSE_TIMEOUT_MINUTES} daqiqadan beri kuryer kutmoqda. Qo'lda biriktiring.`,
+          try {
+            await orderAssignmentService.cancelOrderBySystem(order.id, {
+              note: `Admin tasdiqlagan buyurtmaga kuryer javob bermadi (${env.COURIER_RESPONSE_TIMEOUT_MINUTES} daqiqa)`,
+              reason: "COURIER_TIMEOUT",
+            });
+            logger.info(`Buyurtma #${order.id} courier-pool timeout — CANCELLED`, {
+              context: "CourierTimeoutJob",
+            });
+          } catch (err) {
+            logger.warn(`Timeout cancel failed for #${order.id}`, {
+              context: "CourierTimeoutJob",
+              error: err.message,
             });
           }
-          logger.info(`Buyurtma #${order.id} kuryer kutish vaqti oshdi`, {
-            context: "CourierTimeoutJob",
-          });
         }
       } catch (err) {
         logger.error("CourierTimeoutJob xatoligi", {

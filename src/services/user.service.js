@@ -1,10 +1,16 @@
 const prisma = require("../config/prisma");
+const geoFenceService = require("./geoFence.service");
 
 async function findOrCreateUser(telegramId, fullName, username) {
   let user = await prisma.user.findUnique({ where: { telegramId: BigInt(telegramId) } });
   if (!user) {
     user = await prisma.user.create({
-      data: { telegramId: BigInt(telegramId), fullName, username: username || null, lastActivityAt: new Date() },
+      data: {
+        telegramId: BigInt(telegramId),
+        fullName,
+        username: username || null,
+        lastActivityAt: new Date(),
+      },
     });
   } else {
     user = await prisma.user.update({
@@ -30,10 +36,37 @@ async function updatePhone(telegramId, phone) {
   });
 }
 
+/**
+ * Profile location update. Coordinates (when present) must be inside the service area.
+ * Omitting latitude/longitude leaves existing coords unchanged (text-only address note).
+ */
 async function updateLocation(telegramId, { address, latitude, longitude }) {
+  const coordsProvided = latitude !== undefined || longitude !== undefined;
+  const hasCoords =
+    latitude != null &&
+    longitude != null &&
+    Number.isFinite(Number(latitude)) &&
+    Number.isFinite(Number(longitude));
+
+  if (hasCoords) {
+    geoFenceService.assertInsideServiceArea(latitude, longitude);
+  } else if (coordsProvided) {
+    // Explicit null/invalid coords — do not wipe a valid in-zone profile by accident
+    const err = new Error("Lokatsiya majburiy");
+    err.messageKey = "geoFence.coordsRequired";
+    err.code = "MISSING_COORDS";
+    throw err;
+  }
+
+  const data = { defaultAddress: address };
+  if (hasCoords) {
+    data.latitude = Number(latitude);
+    data.longitude = Number(longitude);
+  }
+
   return prisma.user.update({
     where: { telegramId: BigInt(telegramId) },
-    data: { defaultAddress: address, latitude, longitude },
+    data,
   });
 }
 
@@ -45,7 +78,11 @@ async function updateLanguage(telegramId, language) {
 }
 
 async function isRegistrationComplete(user) {
-  return Boolean(user && user.phone && (user.defaultAddress || (user.latitude && user.longitude)));
+  if (!user?.phone) return false;
+  if (user.latitude != null && user.longitude != null) {
+    return geoFenceService.canDeliverTo(user.latitude, user.longitude);
+  }
+  return false;
 }
 
 async function blockUser(userId, isBlocked = true) {

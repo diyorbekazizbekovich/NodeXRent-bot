@@ -53,9 +53,11 @@ const {
 } = require("./admin.factoryReset.handlers");
 const factoryResetService = require("../../services/factoryReset.service");
 const { registerAdminBackupHandlers, backupKeyboard } = require("./admin.backup.handlers");
+const { registerAdminAuditHandlers } = require("./admin.audit.handlers");
 const adminInventoryItem = require("./admin.inventoryItem.handlers");
 const { label, filterGroup } = require("../../constants/orderStatus");
 const { buildOrderTimeline } = require("../../utils/orderTimeline");
+const { escapeHtml } = require("../../utils/telegramFormat");
 const { addCallbackHandler } = require("../events/callbackRouter");
 
 function isAdminMainCallback(data) {
@@ -109,6 +111,7 @@ function register(bot) {
   registerAdminAnalyticsHandlers(bot, isAdmin);
   registerAdminFactoryResetHandlers(bot, isAdmin);
   registerAdminBackupHandlers(bot, isAdmin);
+  registerAdminAuditHandlers(bot, isAdmin);
 
   bot.onText(/\/admin/, async (msg) => {
     const chatId = msg.chat.id;
@@ -117,17 +120,17 @@ function register(bot) {
       await bot.sendMessage(chatId, "Sizda admin huquqlari yo'q.");
       return;
     }
-    const [stats, alerts] = await Promise.all([
+    const [stats, alertSection] = await Promise.all([
       dashboardKpiService.getKpiStats(),
-      adminAlertService.getAdminAlerts(),
+      adminAlertService.formatDashboardAlertsSection(),
     ]);
     const text =
-      adminAlertService.formatAlerts(alerts) +
+      alertSection +
       "\n\n" +
       dashboardKpiService.formatKpiDashboard(stats) +
-      "\n\n_🔄 Real-time dashboard faol_";
+      "\n\n<i>🔄 Real-time dashboard faol</i>";
     const sent = await bot.sendMessage(chatId, text, {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...adminKeyboards.mainMenuKeyboard({
         isSuperAdmin: factoryResetService.isSuperAdmin(telegramId),
       }),
@@ -195,12 +198,12 @@ function register(bot) {
         sessionStore.clearSession(chatId);
         await bot.sendMessage(
           chatId,
-          `📢 *Yakuniy hisobot*\n\n` +
+          `📢 <b>Yakuniy hisobot</b>\n\n` +
             `Tur: ${result.mediaType}\n` +
             `Jami: ${result.total}\n` +
             `✅ Muvaffaqiyatli: ${result.success}\n` +
             `❌ Xatolik: ${result.failed}`,
-          { parse_mode: "Markdown" }
+          { parse_mode: "HTML" }
         );
       } catch (err) {
         sessionStore.clearSession(chatId);
@@ -227,10 +230,10 @@ function register(bot) {
         sessionStore.clearSession(chatId);
         const counts = await inventoryService.getCountsByType();
         await bot.sendMessage(chatId, `✅ ${consoleType} soni ${target} taga o'rnatildi.`, {
-          parse_mode: "Markdown",
+          parse_mode: "HTML",
           ...adminKeyboards.inventoryTypeKeyboard(),
         });
-        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(counts), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(counts), { parse_mode: "HTML" });
       } catch (err) {
         await bot.sendMessage(chatId, `❌ ${err.message}`);
       }
@@ -325,7 +328,7 @@ function register(bot) {
         await bot.sendMessage(
           chatId,
           `✅ Promo-kod yaratildi:\n\n` +
-            `<b>${promo.code}</b>\n` +
+            `<b>${escapeHtml(promo.code)}</b>\n` +
             `Chegirma: -${promo.discountPercent}%\n` +
             `Limit: ${promo.usageLimit} | Per-user: ${promo.perUserLimit}\n` +
             `Muddat: ${days} kun`,
@@ -359,13 +362,13 @@ function register(bot) {
 
     switch (msg.text) {
       case "📊 Dashboard": {
-        const [stats, alerts] = await Promise.all([
+        const [stats, alertSection] = await Promise.all([
           dashboardKpiService.getKpiStats(),
-          adminAlertService.getAdminAlerts(),
+          adminAlertService.formatDashboardAlertsSection(),
         ]);
         const text =
-          adminAlertService.formatAlerts(alerts) + "\n\n" + dashboardKpiService.formatKpiDashboard(stats);
-        const sent = await bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
+          alertSection + "\n\n" + dashboardKpiService.formatKpiDashboard(stats);
+        const sent = await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
         if (await realtimeDashboardService.isEnabled(telegramId)) {
           realtimeDashboardService.subscribe(chatId, sent.message_id);
         }
@@ -376,8 +379,8 @@ function register(bot) {
         return;
       }
       case "💾 Backup": {
-        await bot.sendMessage(chatId, "💾 *Backup va audit*", {
-          parse_mode: "Markdown",
+        await bot.sendMessage(chatId, "💾 <b>Backup va audit</b>", {
+          parse_mode: "HTML",
           ...backupKeyboard(),
         });
         return;
@@ -394,7 +397,7 @@ function register(bot) {
       }
       case "📅 Bugun": {
         const stats = await dashboardService.getDashboardStats();
-        await bot.sendMessage(chatId, dashboardService.formatTodayBlock(stats), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, dashboardService.formatTodayBlock(stats), { parse_mode: "HTML" });
         return;
       }
       case "📊 Statistika": {
@@ -421,7 +424,7 @@ function register(bot) {
       case "🎮 PlayStationlar": {
         const counts = await inventoryService.getCountsByType();
         await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(counts), {
-          parse_mode: "Markdown",
+          parse_mode: "HTML",
           ...adminKeyboards.inventoryTypeKeyboard(),
         });
         await bot.sendMessage(
@@ -440,9 +443,8 @@ function register(bot) {
         return;
       }
       case "📋 Loglar": {
-        const logs = await auditLogService.recent(15);
-        const text = logs.length ? logs.map(auditLogService.formatEntry).join("\n\n") : "Loglar yo'q.";
-        await bot.sendMessage(chatId, `📋 *Admin loglar*\n\n${text}`, { parse_mode: "Markdown" });
+        const payload = await auditLogService.buildTelegramList(15);
+        await bot.sendMessage(chatId, payload.text, payload.options);
         return;
       }
       case "⚙️ Sozlamalar": {
@@ -453,8 +455,8 @@ function register(bot) {
         ]);
         await bot.sendMessage(
           chatId,
-          `⚙️ *Sozlamalar*\n\n🚚 Yetkazib berish: *${fee.toLocaleString()} so'm*\n🚧 Maintenance: *${maintenanceOn ? "YOQILGAN" : "O'CHIRILGAN"}*\n🔄 Real-time: *${realtimeOn ? "YOQILGAN" : "O'CHIRILGAN"}*`,
-          { parse_mode: "Markdown", ...adminKeyboards.settingsKeyboard({ maintenanceOn, realtimeOn }) }
+          `⚙️ <b>Sozlamalar</b>\n\n🚚 Yetkazib berish: <b>${fee.toLocaleString()} so'm</b>\n🚧 Maintenance: <b>${maintenanceOn ? "YOQILGAN" : "O'CHIRILGAN"}</b>\n🔄 Real-time: <b>${realtimeOn ? "YOQILGAN" : "O'CHIRILGAN"}</b>`,
+          { parse_mode: "HTML", ...adminKeyboards.settingsKeyboard({ maintenanceOn, realtimeOn }) }
         );
         return;
       }
@@ -466,7 +468,7 @@ function register(bot) {
       }
       case "🚚 Kuryerlar": {
         const top = await courierStatsService.getTopCouriers(5);
-        await bot.sendMessage(chatId, courierStatsService.formatTopCouriers(top), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, courierStatsService.formatTopCouriers(top), { parse_mode: "HTML" });
         await bot.sendMessage(chatId, "🚚 Kuryerlar boshqaruvi:", courierAdminMenuKeyboard());
         return;
       }
@@ -474,8 +476,8 @@ function register(bot) {
         sessionStore.setStep(chatId, "admin:ads:await");
         await bot.sendMessage(
           chatId,
-          "📢 *Reklama yuborish*\n\nMatn, rasm, video, ovoz, sticker, hujjat, kontakt yoki lokatsiya yuboring.\nCaption va inline tugmalar saqlanadi.",
-          { parse_mode: "Markdown" }
+          "📢 <b>Reklama yuborish</b>\n\nMatn, rasm, video, ovoz, sticker, hujjat, kontakt yoki lokatsiya yuboring.\nCaption va inline tugmalar saqlanadi.",
+          { parse_mode: "HTML" }
         );
         return;
       }
@@ -617,13 +619,13 @@ function register(bot) {
       const ctx = { telegramId, adminId: adminRecord?.id };
       const enabled = await realtimeDashboardService.toggle(telegramId, ctx);
       if (enabled) {
-        const [stats, alerts] = await Promise.all([
+        const [stats, alertSection] = await Promise.all([
           dashboardKpiService.getKpiStats(),
-          adminAlertService.getAdminAlerts(),
+          adminAlertService.formatDashboardAlertsSection(),
         ]);
         const text =
-          adminAlertService.formatAlerts(alerts) + "\n\n" + dashboardKpiService.formatKpiDashboard(stats);
-        const sent = await bot.sendMessage(chatId, text + "\n\n_🔄 Real-time yoqildi_", { parse_mode: "Markdown" });
+          alertSection + "\n\n" + dashboardKpiService.formatKpiDashboard(stats);
+        const sent = await bot.sendMessage(chatId, text + "\n\n<i>🔄 Real-time yoqildi</i>", { parse_mode: "HTML" });
         realtimeDashboardService.subscribe(chatId, sent.message_id);
         await bot.sendMessage(chatId, "✅ Real-time dashboard yoqildi.");
       } else {
@@ -653,8 +655,8 @@ function register(bot) {
     if (data === "admin:inv:units") {
       const units = await prisma.inventoryUnit.findMany({ orderBy: { unitCode: "asc" }, take: 30 });
       const rows = units.map((u) => [{ text: u.unitCode, callback_data: `admin:inv:unit:${u.id}` }]);
-      await bot.sendMessage(chatId, "📋 *Inventar qurilmalar*", {
-        parse_mode: "Markdown",
+      await bot.sendMessage(chatId, "📋 <b>Inventar qurilmalar</b>", {
+        parse_mode: "HTML",
         reply_markup: { inline_keyboard: rows },
       });
       await safeAnswerCallbackQuery(bot, query.id);
@@ -664,7 +666,7 @@ function register(bot) {
     if (data.startsWith("admin:inv:unit:")) {
       const unitId = Number(data.split(":")[3]);
       const unit = await inventoryService.getUnitById(unitId);
-      await bot.sendMessage(chatId, inventoryService.formatUnitDetail(unit), { parse_mode: "Markdown" });
+      await bot.sendMessage(chatId, inventoryService.formatUnitDetail(unit), { parse_mode: "HTML" });
       await safeAnswerCallbackQuery(bot, query.id);
       return true;
     }
@@ -697,7 +699,7 @@ function register(bot) {
       const orderId = Number(data.split(":")[3]);
       const order = await orderService.getOrderById(orderId);
       if (order) {
-        await bot.sendMessage(chatId, buildOrderTimeline(order), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, buildOrderTimeline(order), { parse_mode: "HTML" });
       }
       await safeAnswerCallbackQuery(bot, query.id);
       return true;
@@ -724,7 +726,7 @@ function register(bot) {
           // noop
         }
         const updated = await inventoryService.getCountsByType();
-        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(updated), { parse_mode: "Markdown" });
+        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(updated), { parse_mode: "HTML" });
       } catch (err) {
         await bot.sendMessage(chatId, `❌ ${err.message}`);
       }

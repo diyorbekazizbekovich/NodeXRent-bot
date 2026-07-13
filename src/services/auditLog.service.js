@@ -1,5 +1,16 @@
+/**
+ * Audit Log Service — persistence + orchestration.
+ * Formatting for Telegram lives in formatter/renderer (SOLID: SRP).
+ */
 const prisma = require("../config/prisma");
-const { formatDatetime, formatDate } = require("../utils/dateHelper");
+const { formatAuditEntry, registerFormatter } = require("./audit/auditLog.formatter");
+const {
+  renderDetail,
+  renderList,
+  detailsKeyboard,
+  formatEntry,
+} = require("./audit/auditLog.renderer");
+const logger = require("../utils/logger");
 
 async function log({
   adminId,
@@ -11,7 +22,7 @@ async function log({
   beforeData,
   afterData,
 }) {
-  return prisma.adminAuditLog.create({
+  const entry = await prisma.adminAuditLog.create({
     data: {
       adminId: adminId ?? null,
       adminTelegramId: adminTelegramId != null ? BigInt(adminTelegramId) : null,
@@ -23,6 +34,19 @@ async function log({
       afterData: afterData ?? undefined,
     },
   });
+
+  // Server log keeps structured JSON for ops — never sent to Telegram as raw dump
+  logger.info("Audit log yozildi", {
+    context: "AuditLog",
+    id: entry.id,
+    action,
+    module,
+    entityType,
+    entityId,
+    adminTelegramId: adminTelegramId != null ? String(adminTelegramId) : null,
+  });
+
+  return entry;
 }
 
 async function recent(limit = 20, { module } = {}) {
@@ -31,6 +55,10 @@ async function recent(limit = 20, { module } = {}) {
     orderBy: { createdAt: "desc" },
     take: limit,
   });
+}
+
+async function findById(id) {
+  return prisma.adminAuditLog.findUnique({ where: { id: Number(id) } });
 }
 
 async function clearAll(adminContext = {}) {
@@ -46,28 +74,48 @@ async function clearAll(adminContext = {}) {
   return count;
 }
 
-function formatEntry(entry) {
-  const d = new Date(entry.createdAt);
-  const date = formatDate(d);
-  const time = d.toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tashkent" });
-  const who = entry.adminTelegramId ? `@admin (${entry.adminTelegramId})` : "Admin";
-  const mod = entry.module ? `[${entry.module}] ` : "";
-
-  let detail = entry.action;
-  if (entry.afterData?.message) {
-    detail = entry.afterData.message;
-  } else if (entry.action === "INVENTORY_COUNT_UPDATED") {
-    detail = `${entry.afterData?.consoleType || "PS"} soni\nOldin: ${entry.beforeData?.count ?? "?"}\nKeyin: ${entry.afterData?.count ?? "?"}`;
-  } else if (entry.beforeData || entry.afterData) {
-    detail = `${JSON.stringify(entry.beforeData || {})} → ${JSON.stringify(entry.afterData || {})}`;
+/**
+ * Telegram list payload: human text + details keyboard.
+ */
+async function buildTelegramList(limit = 15) {
+  const logs = await recent(limit);
+  if (!logs.length) {
+    return { text: "📋 <b>Admin loglar</b>\n\nLoglar yo'q.", options: { parse_mode: "HTML" } };
   }
-
-  return (
-    `${mod}${detail}\n` +
-    `Admin: ${who}\n` +
-    `Sana: ${date}\n` +
-    `Vaqt: ${time}`
-  );
+  return {
+    text: renderList(logs),
+    options: {
+      parse_mode: "HTML",
+      ...detailsKeyboard(logs),
+    },
+  };
 }
 
-module.exports = { log, recent, clearAll, formatEntry };
+/**
+ * Telegram detail payload for one log id.
+ */
+async function buildTelegramDetail(id) {
+  const entry = await findById(id);
+  if (!entry) return null;
+  return {
+    text: renderDetail(entry),
+    options: { parse_mode: "HTML" },
+    entry,
+    formatted: formatAuditEntry(entry),
+  };
+}
+
+module.exports = {
+  log,
+  recent,
+  findById,
+  clearAll,
+  formatEntry,
+  formatAuditEntry,
+  registerFormatter,
+  renderDetail,
+  renderList,
+  detailsKeyboard,
+  buildTelegramList,
+  buildTelegramDetail,
+};

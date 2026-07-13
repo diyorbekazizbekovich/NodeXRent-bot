@@ -1,5 +1,6 @@
 const paymentRepository = require("../repositories/payment.repository");
-const { labelStatus, labelMethod } = require("../constants/paymentStatus");
+const { labelStatus, labelMethod, PaymentStatus } = require("../constants/paymentStatus");
+const prisma = require("../config/prisma");
 
 async function initOrderPayment(order) {
   const amount = Number(order.totalPrice) + Number(order.deliveryFee || 0);
@@ -34,10 +35,37 @@ function formatPaymentList(payments) {
     .join("\n");
 }
 
+async function markPaymentFailed(orderId, { note = "To'lov muvaffaqiyatsiz", cancelOrder = true } = {}) {
+  await prisma.$transaction(async (tx) => {
+    await tx.orderPayment.updateMany({
+      where: { orderId: Number(orderId), status: PaymentStatus.UNPAID },
+      data: { status: PaymentStatus.FAILED, note },
+    });
+  });
+
+  if (cancelOrder) {
+    const orderAssignmentService = require("./orderAssignment.service");
+    try {
+      await orderAssignmentService.cancelOrderBySystem(orderId, {
+        note: "To'lov muvaffaqiyatsiz — buyurtma bekor qilindi",
+        reason: "PAYMENT_FAILED",
+      });
+    } catch (err) {
+      // Order may already be terminal
+      require("../utils/logger").warn("Payment-fail cancel skipped", {
+        context: "PaymentService",
+        orderId,
+        error: err.message,
+      });
+    }
+  }
+}
+
 module.exports = {
   initOrderPayment,
   addPayment,
   getSummary,
   formatSummary,
   formatPaymentList,
+  markPaymentFailed,
 };

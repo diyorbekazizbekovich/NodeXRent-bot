@@ -47,6 +47,7 @@ function createBot() {
 
   applyRateLimitMiddleware(bot);
   initNotificationService(bot);
+  require("../utils/telegramSend").installTelegramOutboundLogging(bot);
 
   // Handlerlar callbacklarni queue ga qo'shadi (bot.on emas)
   userHandlers.register(bot);

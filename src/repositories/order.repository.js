@@ -12,9 +12,13 @@ async function update(orderId, data) {
   return prisma.order.update({ where: { id: orderId }, data, include: orderIncludes() });
 }
 
-async function tryAssignCourier(orderId, courierId, playstationId, extra = {}) {
-  return prisma.order.updateMany({
-    where: { id: orderId, status: "PENDING", courierId: null },
+async function tryAssignCourier(orderId, courierId, playstationId, extra = {}, tx = prisma) {
+  return tx.order.updateMany({
+    where: {
+      id: orderId,
+      status: { in: ["ADMIN_CONFIRMED", "ACCEPTED"] },
+      courierId: null,
+    },
     data: {
       courierId,
       playstationId,
@@ -26,7 +30,18 @@ async function tryAssignCourier(orderId, courierId, playstationId, extra = {}) {
   });
 }
 
-async function createStatusLog(orderId, status, { actorType, actorId, note } = {}) {
+/**
+ * Open (non-terminal) order for a user — used to enforce single active order.
+ */
+async function findOpenOrderForUser(userId, openStatuses, tx = prisma) {
+  return tx.order.findFirst({
+    where: { userId: Number(userId), status: { in: openStatuses } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true },
+  });
+}
+
+async function createStatusLog(orderId, status, { actorType, actorId, note } = {}, tx = prisma) {
   const INT32_MAX = 2147483647;
   let safeActorId = actorId == null ? null : Number(actorId);
   let safeNote = note || null;
@@ -36,7 +51,7 @@ async function createStatusLog(orderId, status, { actorType, actorId, note } = {
     safeActorId = null;
   }
 
-  return prisma.orderStatusLog.create({
+  return tx.orderStatusLog.create({
     data: {
       orderId,
       status,
@@ -103,6 +118,7 @@ module.exports = {
   findById,
   update,
   tryAssignCourier,
+  findOpenOrderForUser,
   createStatusLog,
   listByCourierAndStatuses,
   listByStatus,

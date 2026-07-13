@@ -21,6 +21,10 @@ const env = {
   SUPER_ADMIN_TELEGRAM_IDS: parseIds(process.env.SUPER_ADMIN_TELEGRAM_IDS),
   RETURN_REMINDER_HOURS_BEFORE: Number(process.env.RETURN_REMINDER_HOURS_BEFORE) || 2,
   COURIER_RESPONSE_TIMEOUT_MINUTES: Number(process.env.COURIER_RESPONSE_TIMEOUT_MINUTES) || 10,
+  /** Buyurtma boshlanishidan oldin tasdiqlash oynasi (soat) */
+  ORDER_CONFIRM_WINDOW_HOURS: Number(process.env.ORDER_CONFIRM_WINDOW_HOURS) || 6,
+  /** Tasdiqlanmagan buyurtma uchun yuqori ustuvor eslatma (soat) */
+  ORDER_PRIORITY_REMINDER_HOURS: Number(process.env.ORDER_PRIORITY_REMINDER_HOURS) || 2,
   DEFAULT_COMMISSION_PERCENT: Number(process.env.DEFAULT_COMMISSION_PERCENT) || 0,
   /** Mijoz yetkazib berish lokatsiyasini qayta yuborish oralig'i (ms) */
   LOCATION_UPDATE_COOLDOWN_MS: Number(process.env.LOCATION_UPDATE_COOLDOWN_MS) || 30_000,

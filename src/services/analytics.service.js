@@ -98,7 +98,7 @@ function pivotInventory(rows) {
     const n = row._count._all;
     result[t].total += n;
     if (row.status === "AVAILABLE") result[t].available += n;
-    else if (row.status === "RENTED") result[t].rented += n;
+    else if (row.status === "RENTED" || row.status === "RESERVED") result[t].rented += n;
     else if (row.status === "MAINTENANCE") result[t].maintenance += n;
   }
   return result;

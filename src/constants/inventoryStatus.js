@@ -1,8 +1,9 @@
 const STATUS_LABELS_UZ = {
   AVAILABLE: "Bo'sh",
-  RENTED: "Band",
+  RESERVED: "Band (bron)",
+  RENTED: "Ijarada",
   MAINTENANCE: "Ta'mirda",
-  MISSING_PARTS: "Nosoz",
+  MISSING_PARTS: "Ehtiyot qism yo'q",
   DEFECTIVE: "Nosoz",
 };
 

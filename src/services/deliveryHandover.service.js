@@ -18,6 +18,7 @@ const { getAdminRecipients } = require("../utils/adminRecipients");
 const contractService = require("./contract.service");
 const logger = require("../utils/logger");
 const { CONDITIONS, labelCondition } = require("../constants/inventoryItem");
+const { escapeHtml } = require("../utils/telegramFormat");
 
 const HANDOVER_ALLOWED_FROM = new Set(["ON_THE_WAY", "ARRIVED", "COURIER_ASSIGNED", "ACCEPTED"]);
 const ACTIVE_STATUSES = new Set(["DELIVERED", "ACTIVE"]);
@@ -170,6 +171,15 @@ async function completeHandover({
       data: { status: "ACTIVE" },
     });
 
+    // Device: RESERVED → RENTED (synced with ACTIVE)
+    const deviceStatusService = require("./deviceStatus.service");
+    await deviceStatusService.syncDeviceToOrderStatus(
+      tx,
+      { id: order.id, playstationId: order.playstationId, inventoryUnitId: order.inventoryUnitId },
+      "ACTIVE",
+      { actorType: "courier", actorId: courierId, reason: "HANDOVER_ACTIVE" }
+    );
+
     await tx.orderStatusLog.create({
       data: {
         orderId: order.id,
@@ -317,22 +327,22 @@ async function notifyHandoverComplete(order, meta, contract) {
     `━━━━━━━━━━━━━━\n` +
     `🎮 <b>PlayStation topshirildi — RENTAL ACTIVE</b>\n\n` +
     `📦 Buyurtma: #${order.id}\n` +
-    (contract ? `📄 Shartnoma: ${contract.contractNumber}\n` : "") +
-    `\n👤 Mijoz: ${user?.fullName || "—"}\n` +
-    `📞 ${user?.phone || "—"}\n\n` +
-    `🎮 Console: ${meta.console.inventoryNumber}\n` +
-    `🔢 Serial: ${meta.console.serialNumber}\n` +
-    `🕹 Joysticklar: ${js}\n` +
-    `📺 HDMI: ${meta.hdmi.inventoryNumber}\n` +
-    `🔌 Power: ${meta.power.inventoryNumber}\n\n` +
-    `📅 Ijara: ${durationLabel}\n` +
-    `💰 Asl: ${money(meta.basePrice)}\n` +
-    `🎁 Promo: ${meta.discount > 0 ? money(meta.discount) : "—"}\n` +
-    `💵 To'langan: ${money(meta.finalPaidAmount)}\n` +
-    `💳 To'lov: ${labelHandoverPayment(meta.paymentMethod)}\n` +
-    `🪪 Garov: ${labelCollateral(meta.collateralType)}\n` +
-    `🚚 Kuryer: ${courierName}\n` +
-    `🕒 ${formatDatetime(meta.deliveredAt)}\n` +
+    (contract ? `📄 Shartnoma: ${escapeHtml(contract.contractNumber)}\n` : "") +
+    `\n👤 Mijoz: ${escapeHtml(user?.fullName || "—")}\n` +
+    `📞 ${escapeHtml(user?.phone || "—")}\n\n` +
+    `🎮 Console: ${escapeHtml(meta.console.inventoryNumber)}\n` +
+    `🔢 Serial: ${escapeHtml(meta.console.serialNumber)}\n` +
+    `🕹 Joysticklar: ${escapeHtml(js)}\n` +
+    `📺 HDMI: ${escapeHtml(meta.hdmi.inventoryNumber)}\n` +
+    `🔌 Power: ${escapeHtml(meta.power.inventoryNumber)}\n\n` +
+    `📅 Ijara: ${escapeHtml(durationLabel)}\n` +
+    `💰 Asl: ${escapeHtml(money(meta.basePrice))}\n` +
+    `🎁 Promo: ${meta.discount > 0 ? escapeHtml(money(meta.discount)) : "—"}\n` +
+    `💵 To'langan: ${escapeHtml(money(meta.finalPaidAmount))}\n` +
+    `💳 To'lov: ${escapeHtml(labelHandoverPayment(meta.paymentMethod))}\n` +
+    `🪪 Garov: ${escapeHtml(labelCollateral(meta.collateralType))}\n` +
+    `🚚 Kuryer: ${escapeHtml(courierName)}\n` +
+    `🕒 ${escapeHtml(formatDatetime(meta.deliveredAt))}\n` +
     `━━━━━━━━━━━━━━`;
 
   const admins = await getAdminRecipients();
@@ -349,12 +359,12 @@ async function notifyHandoverComplete(order, meta, contract) {
   }
 
   const customerText = t("notify.handoverComplete", L, {
-    console: `${consoleName} (${meta.console.inventoryNumber})`,
-    start: formatDatetime(order.startDatetime),
-    end: formatDatetime(order.endDatetime),
-    paid: pricingService.formatMoney(meta.finalPaidAmount, "UZS", L),
-    payment: t(`handover.payment.${meta.paymentMethod}`, L),
-    collateral: t(`handover.collateral.${meta.collateralType}`, L),
+    console: escapeHtml(`${consoleName} (${meta.console.inventoryNumber})`),
+    start: escapeHtml(formatDatetime(order.startDatetime)),
+    end: escapeHtml(formatDatetime(order.endDatetime)),
+    paid: escapeHtml(pricingService.formatMoney(meta.finalPaidAmount, "UZS", L)),
+    payment: escapeHtml(t(`handover.payment.${meta.paymentMethod}`, L)),
+    collateral: escapeHtml(t(`handover.collateral.${meta.collateralType}`, L)),
   });
 
   await notify({
@@ -407,7 +417,7 @@ async function completeReturn({
     if (order.courierId !== Number(courierId)) {
       throw new DeliveryHandoverError("FORBIDDEN", "Bu buyurtma sizga tegishli emas");
     }
-    if (!["DELIVERED", "ACTIVE", "RETURN_REQUESTED", "ARRIVED"].includes(order.status)) {
+    if (!["DELIVERED", "ACTIVE", "RETURN_REQUESTED", "ARRIVED", "EXPIRED"].includes(order.status)) {
       throw new DeliveryHandoverError("INVALID_STATUS", `Qaytarib bo'lmaydi: ${order.status}`);
     }
     if (order.status === "COMPLETED" || order.status === "RETURNED") {
@@ -419,6 +429,14 @@ async function completeReturn({
       orderId: order.id,
       actorId: Number(courierId),
       condition: returnCondition,
+    });
+
+    const orderResourceService = require("./orderResource.service");
+    await orderResourceService.releaseOrderResources(tx, order, {
+      actorType: "courier",
+      actorId: courierId,
+      reason: "COMPLETE_RETURN",
+      releaseItems: false,
     });
 
     const now = new Date();
@@ -504,17 +522,17 @@ async function notifyReturnComplete(order, meta) {
     `━━━━━━━━━━━━━━\n` +
     `↩️ <b>Ijara yakunlandi — COMPLETED</b>\n\n` +
     `📦 Buyurtma: #${order.id}\n` +
-    `👤 Mijoz: ${order.user?.fullName || "—"}\n` +
-    `🚚 Kuryer: ${order.courier?.fullName || "—"}\n\n` +
-    `🎮 Console: ${consoleItem?.inventoryNumber || "—"}\n` +
-    `🔢 Serial: ${consoleItem?.serialNumber || "—"}\n` +
-    `🕹 Joysticklar: ${js || "—"}\n` +
-    `📺 HDMI: ${hdmi}\n` +
-    `🔌 Power: ${power}\n\n` +
+    `👤 Mijoz: ${escapeHtml(order.user?.fullName || "—")}\n` +
+    `🚚 Kuryer: ${escapeHtml(order.courier?.fullName || "—")}\n\n` +
+    `🎮 Console: ${escapeHtml(consoleItem?.inventoryNumber || "—")}\n` +
+    `🔢 Serial: ${escapeHtml(consoleItem?.serialNumber || "—")}\n` +
+    `🕹 Joysticklar: ${escapeHtml(js || "—")}\n` +
+    `📺 HDMI: ${escapeHtml(hdmi)}\n` +
+    `🔌 Power: ${escapeHtml(power)}\n\n` +
     `🪪 Garov qaytarildi: ${meta.collateralReturned ? "Ha" : "Yo'q"}\n` +
-    `🛠 Holat: ${labelCondition(meta.returnCondition)}\n` +
-    (meta.returnNote ? `📝 Izoh: ${meta.returnNote}\n` : "") +
-    `🕒 ${formatDatetime(new Date())}\n` +
+    `🛠 Holat: ${escapeHtml(labelCondition(meta.returnCondition))}\n` +
+    (meta.returnNote ? `📝 Izoh: ${escapeHtml(meta.returnNote)}\n` : "") +
+    `🕒 ${escapeHtml(formatDatetime(new Date()))}\n` +
     `━━━━━━━━━━━━━━`;
 
   const admins = await getAdminRecipients();
@@ -540,7 +558,7 @@ async function notifyReturnComplete(order, meta) {
       recipientId: order.userId,
       text: t("notify.returned", L, {
         id: order.id,
-        unit: consoleItem?.inventoryNumber || "—",
+        unit: escapeHtml(consoleItem?.inventoryNumber || "—"),
       }),
       options: { parse_mode: "HTML" },
     });
@@ -551,11 +569,11 @@ async function notifyAdminStep(orderId, title, extraLines = []) {
   const order = await orderRepository.findById(orderId);
   if (!order) return;
   const text =
-    `📌 <b>${title}</b>\n\n` +
+    `📌 <b>${escapeHtml(title)}</b>\n\n` +
     `📦 Buyurtma: #${orderId}\n` +
-    `👤 Mijoz: ${order.user?.fullName || "—"}\n` +
-    `🚚 Kuryer: ${order.courier?.fullName || "—"}\n` +
-    (extraLines.length ? `\n${extraLines.join("\n")}` : "");
+    `👤 Mijoz: ${escapeHtml(order.user?.fullName || "—")}\n` +
+    `🚚 Kuryer: ${escapeHtml(order.courier?.fullName || "—")}\n` +
+    (extraLines.length ? `\n${extraLines.map((l) => escapeHtml(l)).join("\n")}` : "");
 
   const admins = await getAdminRecipients();
   for (const admin of admins) {

@@ -15,7 +15,7 @@ function registerAdminOrderHandlers(bot, isAdmin) {
     const parts = data.split(":");
     const action = parts[2];
     // timeline va boshqa noma'lum actionlar admin.handlers ga o'tsin
-    if (!["confirm", "reject", "cancel", "details", "assign", "assignTo"].includes(action)) {
+    if (!["confirm", "confirmBlocked", "reject", "cancel", "details", "assign", "assignTo"].includes(action)) {
       return false;
     }
 
@@ -31,10 +31,22 @@ function registerAdminOrderHandlers(bot, isAdmin) {
     }
 
     try {
-      if (action === "confirm") {
+      if (action === "confirmBlocked") {
+        const orderId = Number(parts[3]);
+        await bot.sendMessage(chatId, "⏳ Ushbu buyurtmani hali tasdiqlab bo'lmaydi.");
+      } else if (action === "confirm") {
         const orderId = Number(parts[3]);
         await orderAssignmentService.confirmOrderByAdmin(orderId, telegramId);
-        await bot.sendMessage(chatId, `✅ Buyurtma #${orderId} tasdiqlandi.`);
+        await bot.sendMessage(
+          chatId,
+          `✅ Buyurtma #${orderId} tasdiqlandi (ADMIN_CONFIRMED).\n🚚 Kuryerlar navbatiga yuborildi.`
+        );
+        try {
+          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+          });
+        } catch (_) {}
       } else if (action === "reject") {
         const orderId = Number(parts[3]);
         await orderAssignmentService.rejectOrderByAdmin(orderId, telegramId);

@@ -38,7 +38,7 @@ async function getKpiStats() {
     }),
     Promise.resolve(null),
     prisma.inventoryUnit.count(),
-    prisma.inventoryUnit.count({ where: { status: "RENTED" } }),
+    prisma.inventoryUnit.count({ where: { status: { in: ["RENTED", "RESERVED"] } } }),
     prisma.order.groupBy({
       by: ["consoleType"],
       where: { status: { in: REVENUE_STATUSES } },
@@ -109,21 +109,22 @@ async function getKpiStats() {
 }
 
 function formatKpiDashboard(stats) {
+  const { escapeHtml } = require("../utils/telegramFormat");
   const base = dashboardService.formatDashboard(stats);
   const k = stats.kpi;
   return (
     base +
-    "\n\n📈 *KPI*\n" +
-    `• Bugungi foyda: ${Math.round(k.todayProfit).toLocaleString()} so'm\n` +
-    `• Haftalik foyda: ${Math.round(k.weekProfit).toLocaleString()} so'm\n` +
-    `• Oylik foyda: ${Math.round(k.monthProfit).toLocaleString()} so'm\n` +
-    `• O'rtacha buyurtma: ${Math.round(k.avgOrderAmount).toLocaleString()} so'm\n` +
-    `• O'rtacha ijara: ${k.avgRentalHours} soat\n` +
-    `• Bandlik: ${k.occupancyRate}%\n` +
-    `• Top model: ${k.topConsole}\n` +
-    `• Top mijoz: ${k.topCustomer}\n` +
-    `• Top kuryer: ${k.topCourier}\n` +
-    `• Bekor foizi: ${k.cancelRate}%`
+    "\n\n📈 <b>KPI</b>\n" +
+    `• Bugungi foyda: ${escapeHtml(String(Math.round(k.todayProfit).toLocaleString()))} so'm\n` +
+    `• Haftalik foyda: ${escapeHtml(String(Math.round(k.weekProfit).toLocaleString()))} so'm\n` +
+    `• Oylik foyda: ${escapeHtml(String(Math.round(k.monthProfit).toLocaleString()))} so'm\n` +
+    `• O'rtacha buyurtma: ${escapeHtml(String(Math.round(k.avgOrderAmount).toLocaleString()))} so'm\n` +
+    `• O'rtacha ijara: ${escapeHtml(k.avgRentalHours)} soat\n` +
+    `• Bandlik: ${escapeHtml(k.occupancyRate)}%\n` +
+    `• Top model: ${escapeHtml(k.topConsole)}\n` +
+    `• Top mijoz: ${escapeHtml(k.topCustomer)}\n` +
+    `• Top kuryer: ${escapeHtml(k.topCourier)}\n` +
+    `• Bekor foizi: ${escapeHtml(k.cancelRate)}%`
   );
 }
 

@@ -11,6 +11,7 @@ const {
 } = require("../keyboards/support.keyboards");
 const prisma = require("../../config/prisma");
 const { addCallbackHandler } = require("../events/callbackRouter");
+const { escapeHtml } = require("../../utils/telegramFormat");
 
 function crmListKeyboard(users) {
   const rows = users.map((u) => [
@@ -47,8 +48,8 @@ function registerAdminCrmHandlers(bot, isAdmin) {
         await bot.sendMessage(chatId, "Mijoz ismi, telefon yoki username kiriting:");
       } else if (action === "back") {
         const users = await customerCrmService.listCustomers({});
-        await bot.sendMessage(chatId, "👥 *Mijozlar CRM*", {
-          parse_mode: "Markdown",
+        await bot.sendMessage(chatId, "👥 <b>Mijozlar CRM</b>", {
+          parse_mode: "HTML",
           ...crmListKeyboard(users),
         });
       } else if (action === "view") {
@@ -61,10 +62,14 @@ function registerAdminCrmHandlers(bot, isAdmin) {
             await bot.sendMessage(chatId, "Mijoz topilmadi.");
           } else {
             const name = profile.user.fullName || profile.user.phone || profile.user.telegramId;
-            await bot.sendMessage(chatId, `👤 *${name}*\n\nQuyidagi amallardan birini tanlang:`, {
-              parse_mode: "Markdown",
-              ...customerActionsKeyboard(userId),
-            });
+            await bot.sendMessage(
+              chatId,
+              `👤 <b>${escapeHtml(name)}</b>\n\nQuyidagi amallardan birini tanlang:`,
+              {
+                parse_mode: "HTML",
+                ...customerActionsKeyboard(userId),
+              }
+            );
           }
         }
       } else if (action === "profile") {
@@ -74,7 +79,7 @@ function registerAdminCrmHandlers(bot, isAdmin) {
           await bot.sendMessage(chatId, "Mijoz topilmadi.");
         } else {
           await bot.sendMessage(chatId, customerCrmService.formatProfile(profile), {
-            parse_mode: "Markdown",
+            parse_mode: "HTML",
             ...crmProfileActionsKeyboard(userId),
           });
         }
@@ -85,7 +90,7 @@ function registerAdminCrmHandlers(bot, isAdmin) {
           await bot.sendMessage(chatId, "Mijoz topilmadi.");
         } else {
           await bot.sendMessage(chatId, customerCrmService.formatOrderHistory(profile.user), {
-            parse_mode: "Markdown",
+            parse_mode: "HTML",
             ...customerActionsKeyboard(userId),
           });
         }
@@ -93,7 +98,7 @@ function registerAdminCrmHandlers(bot, isAdmin) {
         const userId = Number(parts[3]);
         const { text } = await supportChatService.getChatHistory(userId, { take: 25 });
         await bot.sendMessage(chatId, text, {
-          parse_mode: "Markdown",
+          parse_mode: "HTML",
           ...customerActionsKeyboard(userId),
         });
       } else if (action === "msg") {
@@ -137,8 +142,8 @@ async function handleCrmAdminMessage(bot, chatId, msg, session) {
       await bot.sendMessage(chatId, "Mijoz topilmadi.");
       return true;
     }
-    await bot.sendMessage(chatId, "👥 *CRM — natijalar*", {
-      parse_mode: "Markdown",
+    await bot.sendMessage(chatId, "👥 <b>CRM — natijalar</b>", {
+      parse_mode: "HTML",
       ...crmListKeyboard(users),
     });
     return true;
@@ -160,8 +165,8 @@ async function handleCrmAdminMessage(bot, chatId, msg, session) {
 
 async function showCrmMenu(bot, chatId) {
   const users = await customerCrmService.listCustomers({});
-  await bot.sendMessage(chatId, "👥 *Mijozlar CRM*", {
-    parse_mode: "Markdown",
+  await bot.sendMessage(chatId, "👥 <b>Mijozlar CRM</b>", {
+    parse_mode: "HTML",
     ...crmListKeyboard(users),
   });
 }

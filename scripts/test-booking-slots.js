@@ -5,26 +5,18 @@
 const {
   getEarliestBookableDatetime,
   getAvailableTimeSlots,
-  isOrderCreationOpen,
   validateStartDatetime,
   combineDateAndTime,
 } = require("../src/services/bookingSlot.service");
-const { zonedDateTime, formatDatetime, startOfDay } = require("../src/utils/dateHelper");
+const { zonedDateTime, startOfDay, zonedParts } = require("../src/utils/dateHelper");
 
 function assert(cond, msg) {
   if (!cond) throw new Error(`FAIL: ${msg}`);
 }
 
-function earliestLabel(y, m, d, h, min) {
-  const now = zonedDateTime(y, m, d, h, min, 0);
-  const earliest = getEarliestBookableDatetime(now);
-  return formatDatetime(earliest).slice(11); // HH:MM via formatDatetime is DD.MM.YYYY HH:MM — take time part carefully
-}
-
 function earliestHour(y, m, d, h, min) {
   const now = zonedDateTime(y, m, d, h, min, 0);
   const earliest = getEarliestBookableDatetime(now);
-  const { formatDatetime: _f, zonedParts } = require("../src/utils/dateHelper");
   const p = zonedParts(earliest);
   return `${String(p.hour).padStart(2, "0")}:00`;
 }
@@ -41,29 +33,25 @@ function run() {
   assert(earliestHour(2026, 7, 12, 13, 10) === "14:00", "13:10 → 14:00");
   assert(earliestHour(2026, 7, 12, 13, 15) === "15:00", "13:15 → 15:00");
 
-  // --- Working hours edge cases ---
+  // --- Working hours edge cases (slots only — order flow always open) ---
   assert(earliestHour(2026, 7, 12, 1, 30) === "02:00", "01:30 → 02:00");
   assert(earliestHour(2026, 7, 12, 1, 41) === "09:00", "01:41 → 09:00");
   assert(earliestHour(2026, 7, 12, 2, 1) === "09:00", "02:01 → 09:00");
-  // 08:30 is past 08:10 cutoff for 09:00 → earliest 10:00 (10-minute rule)
+  assert(earliestHour(2026, 7, 12, 2, 30) === "09:00", "02:30 → 09:00");
+  assert(earliestHour(2026, 7, 12, 3, 0) === "09:00", "03:00 → 09:00");
+  assert(earliestHour(2026, 7, 12, 6, 30) === "09:00", "06:30 → 09:00");
   assert(earliestHour(2026, 7, 12, 8, 30) === "10:00", "08:30 → 10:00");
-
-  // --- Order creation window ---
-  assert(isOrderCreationOpen(zonedDateTime(2026, 7, 12, 8, 30)) === true, "08:30 open");
-  assert(isOrderCreationOpen(zonedDateTime(2026, 7, 12, 1, 30)) === true, "01:30 open");
-  assert(isOrderCreationOpen(zonedDateTime(2026, 7, 12, 2, 1)) === false, "02:01 closed");
-  assert(isOrderCreationOpen(zonedDateTime(2026, 7, 12, 3, 0)) === false, "03:00 closed");
-  assert(isOrderCreationOpen(zonedDateTime(2026, 7, 12, 10, 0)) === true, "10:00 open");
+  assert(earliestHour(2026, 7, 12, 8, 45) === "10:00", "08:45 → 10:00");
 
   // --- Full-hour slots only (no :30) ---
   const slotsMorning = getAvailableTimeSlots(
     startOfDay(zonedDateTime(2026, 7, 12, 0, 0, 0)),
-    zonedDateTime(2026, 7, 12, 8, 0, 0)
+    zonedDateTime(2026, 7, 12, 3, 0, 0)
   );
   assert(slotsMorning.every((s) => s.endsWith(":00")), "only full hours");
   assert(!slotsMorning.includes("09:30"), "no 09:30");
-  assert(slotsMorning.includes("09:00"), "has 09:00");
-  assert(!slotsMorning.includes("02:00"), "02:00 already past at 08:00");
+  assert(slotsMorning.includes("09:00"), "03:00 → has 09:00");
+  assert(!slotsMorning.includes("02:00"), "02:00 already past at 03:00");
 
   const slotsNight = getAvailableTimeSlots(
     startOfDay(zonedDateTime(2026, 7, 12, 0, 0, 0)),
@@ -72,9 +60,23 @@ function run() {
   assert(slotsNight.includes("02:00"), "01:00 still allows 02:00");
   assert(slotsNight.includes("09:00"), "also later day slots");
 
+  // Evening today → overnight 00/01/02 (next calendar morning)
+  const slotsEvening = getAvailableTimeSlots(
+    startOfDay(zonedDateTime(2026, 7, 12, 0, 0, 0)),
+    zonedDateTime(2026, 7, 12, 23, 0, 0)
+  );
+  assert(slotsEvening.includes("00:00"), "23:00 → 00:00 available");
+  assert(slotsEvening.includes("01:00"), "23:00 → 01:00 available");
+  assert(slotsEvening.includes("02:00"), "23:00 → 02:00 available");
+  const overnight = combineDateAndTime(
+    startOfDay(zonedDateTime(2026, 7, 12, 0, 0, 0)),
+    "01:00",
+    zonedDateTime(2026, 7, 12, 23, 0, 0)
+  );
+  const op = zonedParts(overnight);
+  assert(op.day === 13 && op.hour === 1, "01:00 at 23:00 resolves to next day");
+
   // --- Validation rejects :30 and past ---
-  const badHalf = combineDateAndTime(zonedDateTime(2026, 7, 12, 0, 0, 0), "10:30");
-  // combine allows parsing 10:30 but validate must reject
   const vHalf = validateStartDatetime(
     zonedDateTime(2026, 7, 12, 10, 30, 0).toISOString(),
     zonedDateTime(2026, 7, 12, 8, 0, 0)
@@ -93,8 +95,7 @@ function run() {
   );
   assert(vPast.valid === false && vPast.code === "PAST_TIME", "08:11 cannot book 09:00");
 
-  // Midnight wrap: 23:50 → 01:00 next day
-  assert(earliestHour(2026, 7, 12, 23, 50) === "01:00", "23:50 → 01:00 next calendar logic");
+  assert(earliestHour(2026, 7, 12, 23, 50) === "01:00", "23:50 → 01:00");
 
   console.log("All booking slot tests passed.");
 }

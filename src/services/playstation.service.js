@@ -1,8 +1,10 @@
 const prisma = require("../config/prisma");
+const deviceStatusService = require("./deviceStatus.service");
+const { DeviceStatus } = require("../constants/deviceStatus");
 
 async function addPlaystation(courierId, { type, serialNumber, accessories }) {
   return prisma.playstation.create({
-    data: { courierId, type, serialNumber, accessories },
+    data: { courierId, type, serialNumber, accessories, status: DeviceStatus.AVAILABLE },
   });
 }
 
@@ -18,36 +20,30 @@ async function setStatus(playstationId, status) {
 }
 
 /**
- * Berilgan konsol turi, hudud va vaqt oralig'ida bo'sh (band bo'lmagan) PlayStationlarni topadi.
- * Har bir nomzod uchun tegishli kuryer ma'lumoti ham qaytariladi (masofa hisoblash uchun).
+ * Faqat AVAILABLE qurilmalar. Ta'mir / band / reserved — hech qachon.
  */
 async function findAvailableForCourier(courierId, consoleType, startDatetime, endDatetime) {
-  const available = await findAvailable({ consoleType, startDatetime, endDatetime });
-  return available.find((ps) => ps.courierId === courierId) || null;
+  return deviceStatusService.findAssignableForCourier(
+    courierId,
+    consoleType,
+    startDatetime,
+    endDatetime
+  );
 }
 
 async function findAvailable({ consoleType, startDatetime, endDatetime }) {
-  const candidates = await prisma.playstation.findMany({
-    where: {
-      type: consoleType,
-      status: "AVAILABLE",
-      courier: { isActive: true },
-    },
-    include: { courier: true },
+  return deviceStatusService.listAssignablePlaystations({
+    consoleType,
+    startDatetime,
+    endDatetime,
   });
-
-  const busyOrders = await prisma.order.findMany({
-    where: {
-      status: {
-        in: ["PENDING", "COURIER_ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"],
-      },
-      AND: [{ startDatetime: { lte: endDatetime } }, { endDatetime: { gte: startDatetime } }],
-    },
-    select: { playstationId: true },
-  });
-  const busyIds = new Set(busyOrders.map((o) => o.playstationId).filter(Boolean));
-
-  return candidates.filter((ps) => !busyIds.has(ps.id));
 }
 
-module.exports = { addPlaystation, listByCourier, setStatus, findAvailable, findAvailableForCourier };
+module.exports = {
+  addPlaystation,
+  listByCourier,
+  setStatus,
+  findAvailable,
+  findAvailableForCourier,
+  DeviceStatus,
+};

@@ -1,18 +1,18 @@
 /**
  * Central booking-slot algorithm (Asia/Tashkent).
  *
- * Working window: 09:00 → 02:00 (overnight).
+ * Working window for *slots*: 09:00 → 02:00 (overnight).
  * Slots: full hours only (no :30).
  * Lead time: book hour H by (H−1):10 inclusive (50 min before).
  * Last slot 02:00: bookable until 01:40 inclusive (20 min before).
- * Order creation: open 08:00–02:00; closed 02:01–07:59.
+ *
+ * Order flow is ALWAYS open — working hours only filter available slots.
  */
 
 const { zonedParts, zonedDateTime, startOfDay, addHours } = require("../utils/dateHelper");
 
 const WORKING_OPEN_HOUR = 9;
 const WORKING_CLOSE_HOUR = 2; // last bookable hour
-const ORDER_CREATION_PREOPEN_HOUR = 8;
 const STANDARD_CUTOFF_MINUTE = 10; // (H-1):10
 const LAST_SLOT_CUTOFF_MINUTE = 40; // 01:40 for 02:00
 
@@ -64,11 +64,37 @@ function parseTimeSlot(time) {
   return { hours, minutes };
 }
 
-function combineDateAndTime(baseDate, time) {
+function advanceCalendarDay(year, month, day, addDays = 1) {
+  const noon = zonedDateTime(year, month, day, 12, 0, 0);
+  const next = addHours(noon, addDays * 24);
+  const p = zonedParts(next);
+  return { year: p.year, month: p.month, day: p.day };
+}
+
+/**
+ * Resolve slot datetime for a selected calendar day.
+ * Evening bookings (after 09:00): past early-morning labels 00–02 map to the next calendar day
+ * so "today" at 23:00 still offers 00:00 / 01:00 / 02:00 (tonight after midnight).
+ */
+function combineDateAndTime(baseDate, time, now = new Date()) {
   const parsed = parseTimeSlot(time);
   if (!parsed) return null;
   const p = zonedParts(baseDate);
-  return zonedDateTime(p.year, p.month, p.day, parsed.hours, parsed.minutes, 0);
+  let slot = zonedDateTime(p.year, p.month, p.day, parsed.hours, parsed.minutes, 0);
+
+  const nowParts = zonedParts(now);
+  if (
+    parsed.hours <= WORKING_CLOSE_HOUR &&
+    parsed.minutes === 0 &&
+    isSameCalendarDay(baseDate, now) &&
+    nowParts.hour >= WORKING_OPEN_HOUR &&
+    slot.getTime() < now.getTime()
+  ) {
+    const next = advanceCalendarDay(p.year, p.month, p.day, 1);
+    slot = zonedDateTime(next.year, next.month, next.day, parsed.hours, parsed.minutes, 0);
+  }
+
+  return slot;
 }
 
 function isWorkingHourSlot(hours, minutes = 0) {
@@ -76,26 +102,6 @@ function isWorkingHourSlot(hours, minutes = 0) {
   if (hours >= WORKING_OPEN_HOUR && hours <= 23) return true;
   if (hours >= 0 && hours <= WORKING_CLOSE_HOUR) return true;
   return false;
-}
-
-/**
- * Order flow may start from 08:00 through 02:00 (incl. pre-open for 09:00 bookings).
- * Closed strictly between 02:01 and 07:59.
- */
-function isOrderCreationOpen(now = new Date()) {
-  const p = zonedParts(now);
-  const mins = p.hour * 60 + p.minute;
-  const closeMins = WORKING_CLOSE_HOUR * 60; // 02:00
-  const openMins = ORDER_CREATION_PREOPEN_HOUR * 60; // 08:00
-  if (mins > closeMins && mins < openMins) return false;
-  return true;
-}
-
-function advanceCalendarDay(year, month, day, addDays = 1) {
-  const noon = zonedDateTime(year, month, day, 12, 0, 0);
-  const next = addHours(noon, addDays * 24);
-  const p = zonedParts(next);
-  return { year: p.year, month: p.month, day: p.day };
 }
 
 /**
@@ -139,7 +145,7 @@ function getAvailableTimeSlots(baseDate, now = new Date()) {
   const earliest = getEarliestBookableDatetime(now);
 
   return DAY_SLOTS.filter((slot) => {
-    const slotDate = combineDateAndTime(base, slot);
+    const slotDate = combineDateAndTime(base, slot, now);
     if (!slotDate) return false;
     const parsed = parseTimeSlot(slot);
     if (!parsed || !isWorkingHourSlot(parsed.hours, parsed.minutes)) return false;
@@ -192,7 +198,6 @@ function validateStartDatetime(startDatetime, now = new Date()) {
 module.exports = {
   WORKING_OPEN_HOUR,
   WORKING_CLOSE_HOUR,
-  ORDER_CREATION_PREOPEN_HOUR,
   STANDARD_CUTOFF_MINUTE,
   LAST_SLOT_CUTOFF_MINUTE,
   DAY_SLOTS,
@@ -202,7 +207,6 @@ module.exports = {
   parseTimeSlot,
   combineDateAndTime,
   isWorkingHourSlot,
-  isOrderCreationOpen,
   getEarliestBookableDatetime,
   getAvailableTimeSlots,
   validateStartDatetime,

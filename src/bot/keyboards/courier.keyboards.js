@@ -26,13 +26,25 @@ function locationButton(orderId) {
   return { text: "📍 Lokatsiya", callback_data: `courier:location:${orderId}` };
 }
 
-function newOrderKeyboard(orderId, lat, lon) {
-  const rows = [
-    [
-      { text: "✅ Qabul qilish", callback_data: `courier:accept:${orderId}` },
+function newOrderKeyboard(orderId, lat, lon, { confirmAllowed = false, highPriority = false } = {}) {
+  const rows = [];
+  if (confirmAllowed) {
+    rows.push([
+      {
+        text: highPriority ? "🚨 Qabul qilish (PRIORITY)" : "✅ Qabul qilish",
+        callback_data: `courier:accept:${orderId}`,
+      },
       { text: "❌ Rad etish", callback_data: `courier:reject:${orderId}` },
-    ],
-  ];
+    ]);
+  } else {
+    rows.push([
+      {
+        text: "⏳ Hali qabul qilib bo'lmaydi",
+        callback_data: `courier:acceptBlocked:${orderId}`,
+      },
+      { text: "❌ Rad etish", callback_data: `courier:reject:${orderId}` },
+    ]);
+  }
   if (lat != null && lon != null) {
     rows.push([locationButton(orderId)]);
   }

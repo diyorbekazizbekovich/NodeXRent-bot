@@ -15,6 +15,7 @@ enum ConsoleType {
 
 enum PlaystationStatus {
   AVAILABLE
+  RESERVED
   RENTED
   MAINTENANCE
   MISSING_PARTS
@@ -79,6 +80,7 @@ enum ExtensionStatus {
 
 enum OrderStatus {
   PENDING
+  ADMIN_CONFIRMED
   COURIER_ASSIGNED
   ACCEPTED
   REJECTED
@@ -118,6 +120,9 @@ enum NotificationType {
   LOCATION_UPDATED
   PROMO
   ADVERTISEMENT
+  ORDER_CONFIRM_READY
+  ORDER_PRIORITY_REMINDER
+  ORDER_START_REMINDER
 }
 
 model User {
@@ -159,6 +164,7 @@ model Courier {
   playstations Playstation[]
   orders       Order[]
   deliveredOrders Order[]    @relation("OrderDeliveredBy")
+  orderRejections OrderCourierRejection[]
 
   @@map("couriers")
 }
@@ -360,6 +366,11 @@ model Order {
   deliveryCompletedAt DateTime?
   assignedByAdmin Boolean    @default(false)
 
+  /// Admin/kuryer tasdiqlagan vaqt (confirm window ichida)
+  confirmedAt     DateTime?
+  /// 2 soatlik priority eslatma yuborilganda
+  isHighPriority  Boolean  @default(false)
+
   deliveryZoneCode String?
 
   /// Topshirish paytida olingan to'lov
@@ -397,14 +408,46 @@ model Order {
   orderItems       OrderInventoryItem[]
   contract         RentalContract?
   photos           OrderPhoto[]
+  reminderLogs     OrderReminderLog[]
+  courierRejections OrderCourierRejection[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
   @@index([status, endDatetime])
+  @@index([status, startDatetime])
   @@index([paymentReceived])
+  @@index([isHighPriority])
   @@map("orders")
+}
+
+/// Idempotent reminder audit — server restart da qayta yuborilmasin
+model OrderReminderLog {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind      String
+  sentAt    DateTime @default(now())
+  meta      Json?
+
+  @@unique([orderId, kind])
+  @@index([kind, sentAt])
+  @@map("order_reminder_logs")
+}
+
+/// Courier declined an ADMIN_CONFIRMED order (re-queue pool exclusion)
+model OrderCourierRejection {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courierId Int
+  courier   Courier  @relation(fields: [courierId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, courierId])
+  @@index([orderId])
+  @@map("order_courier_rejections")
 }
 
 /// Yetkazib berish manzili o'zgarishlari tarixi (faqat eng so'nggisi Order da active)
