@@ -28,6 +28,7 @@ const env = {
   DEFAULT_COMMISSION_PERCENT: Number(process.env.DEFAULT_COMMISSION_PERCENT) || 0,
   /** Mijoz yetkazib berish lokatsiyasini qayta yuborish oralig'i (ms) */
   LOCATION_UPDATE_COOLDOWN_MS: Number(process.env.LOCATION_UPDATE_COOLDOWN_MS) || 30_000,
+  RUN_SEED: String(process.env.RUN_SEED || "false").toLowerCase() === "true",
 };
 
 if (!env.BOT_TOKEN) {
@@ -35,6 +36,15 @@ if (!env.BOT_TOKEN) {
 }
 if (!env.DATABASE_URL) {
   console.warn("[env] OGOHLANTIRISH: DATABASE_URL .env faylida topilmadi!");
+}
+if (env.NODE_ENV === "production") {
+  if (!env.BOT_TOKEN || !env.DATABASE_URL) {
+    console.error("[env] FATAL: BOT_TOKEN and DATABASE_URL are required in production");
+    process.exit(1);
+  }
+  if (!env.ADMIN_TELEGRAM_IDS.length) {
+    console.warn("[env] OGOHLANTIRISH: ADMIN_TELEGRAM_IDS bo'sh — admin panel ishlamasligi mumkin");
+  }
 }
 
 module.exports = env;

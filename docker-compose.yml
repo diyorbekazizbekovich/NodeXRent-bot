@@ -1,26 +1,84 @@
+# Production Docker Compose — NodeXRent Telegram Bot + PostgreSQL
+# Usage on VPS:
+#   cp .env.example .env   # edit secrets
+#   docker compose up -d --build
+#
+# Notes:
+# - Postgres is NOT published to the host (internal network only).
+# - App restarts after reboot via restart: unless-stopped + Docker daemon.
+# - Persistent volumes: pgdata, app_logs, app_backups, app_uploads.
+
 services:
   postgres:
     image: postgres:16-alpine
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: playstation_rental
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-nodexrent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_set_in_env}
+      POSTGRES_DB: ${POSTGRES_DB:-nodexrent}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init-schema.sql:ro
+    networks:
+      - nodexrent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nodexrent} -d ${POSTGRES_DB:-nodexrent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Security: do not expose 5432 publicly on Contabo VPS
+    # Uncomment only for emergency local debugging from the host:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
 
-  app:
-    build: .
-    restart: always
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL}
+      RUN_SEED: ${RUN_SEED:-false}
     ports:
-      - "3000:3000"
-    command: sh -c "npx prisma migrate deploy && npx prisma db seed && node src/server.js"
+      - "${PORT:-3000}:3000"
+    volumes:
+      - app_logs:/app/logs
+      - app_backups:/app/backups
+      - app_uploads:/app/uploads
+    networks:
+      - nodexrent
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.exit(r.statusCode===200&&d.includes('ok')?0:1))}).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  nodexrent:
+    driver: bridge
 
 volumes:
   pgdata:
+  app_logs:
+  app_backups:
+  app_uploads:

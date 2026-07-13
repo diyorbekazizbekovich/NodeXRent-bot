@@ -1,5 +1,32 @@
+# Dependencies
 node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Env & secrets
 .env
-logs/*.log
-dist/
+.env.local
+.env.*.local
+!.env.example
+
+# Runtime data
+logs/
+*.log
+backups/
+!backups/.gitkeep
+uploads/
+!uploads/.gitkeep
+tmp/
 .DS_Store
+
+# Build / IDE
+dist/
+build/
+coverage/
+.nyc_output/
+.idea/
+.vscode/
+*.swp
+
+# Docker overrides (local)
+docker-compose.override.yml

@@ -408,30 +408,39 @@ Confirm items → collateral returned → condition → note → photo → items
 
 ## Production Deployment
 
-### Option A — Docker Compose (included)
+**Full Contabo / Ubuntu 24.04 guide:** see [`DEPLOYMENT.md`](./DEPLOYMENT.md)  
+(clone, `.env`, `docker compose up -d --build`, update, rollback, backup/restore).
+
+### Quick start (Docker Compose)
 
 ```bash
 cp .env.example .env
-# fill BOT_TOKEN, ADMIN_TELEGRAM_IDS, etc.
+# Set BOT_TOKEN, POSTGRES_*, DATABASE_URL (@postgres host), ADMIN_TELEGRAM_IDS
+# First deploy only: RUN_SEED=true
 
-docker compose up -d --build
+docker compose build
+docker compose up -d
+docker compose logs -f
+docker compose ps
+curl -s http://127.0.0.1:3000/health
 ```
 
 Compose will:
 
-1. Start PostgreSQL 16  
-2. Build the Node app  
-3. Run `prisma migrate deploy` + seed  
-4. Start `node src/server.js` on port **3000**
+1. Start PostgreSQL 16 (internal network, persistent volume)  
+2. Build multi-stage Node image  
+3. Run `prisma migrate deploy` (not `migrate dev`)  
+4. Optionally seed if `RUN_SEED=true`  
+5. Start `node src/server.js` with `restart: unless-stopped`
 
-### Option B — Bare metal / VPS
+### Bare metal (without Compose)
 
 ```bash
 npm ci --omit=dev
-npx prisma generate
-npx prisma migrate deploy
-npm run seed   # first deploy only
-NODE_ENV=production BOT_MODE=webhook npm start
+npm run build                 # prisma generate
+npm run prisma:migrate        # prisma migrate deploy
+RUN_SEED=true npm run seed    # first deploy only
+NODE_ENV=production npm run start:prod
 ```
 
 ### Recommended (not bundled)
@@ -471,12 +480,16 @@ POST /webhook/<BOT_TOKEN>
 
 | Script | Command | Description |
 |--------|---------|-------------|
-| `start` | `node src/server.js` | Production start |
+| `start` | `node src/server.js` | Start bot |
+| `start:prod` | `NODE_ENV=production node src/server.js` | Production start |
 | `dev` | `nodemon src/server.js` | Development with reload |
-| `prisma:generate` | `prisma generate` | Generate Prisma Client |
-| `prisma:migrate` | `prisma migrate dev --name init` | Dev migration |
+| `build` | `prisma generate` | Generate Prisma Client |
+| `prisma:generate` | `prisma generate` | Same as build |
+| `prisma:migrate` | `prisma migrate deploy` | **Production** migrations |
+| `prisma:migrate:dev` | `prisma migrate dev` | Local/dev migrations only |
 | `prisma:studio` | `prisma studio` | Visual DB browser |
-| `seed` | `node prisma/seed.js` | Seed catalog / prices / admins |
+| `seed` | `node prisma/seed.js` | Seed catalog / prices (first deploy) |
+| `healthcheck` | HTTP GET `/health` | Local health probe |
 
 ---
 

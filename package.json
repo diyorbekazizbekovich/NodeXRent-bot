@@ -3,13 +3,21 @@
   "version": "1.0.0",
   "description": "PlayStation ijara Telegram bot — node-telegram-bot-api + Express + Prisma + PostgreSQL",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
+    "start:prod": "NODE_ENV=production node src/server.js",
     "dev": "nodemon src/server.js",
+    "build": "prisma generate",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "node prisma/seed.js"
+    "prisma:deploy": "prisma migrate deploy",
+    "seed": "node prisma/seed.js",
+    "healthcheck": "node -e \"require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
@@ -18,11 +26,11 @@
     "node-cron": "^4.6.0",
     "node-telegram-bot-api": "^1.1.2",
     "pdfkit": "^0.19.1",
+    "prisma": "^5.18.0",
     "winston": "^3.13.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4",
-    "prisma": "^5.18.0"
+    "nodemon": "^3.1.4"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

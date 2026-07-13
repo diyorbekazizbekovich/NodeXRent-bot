@@ -1,0 +1,22 @@
+# Build context hygiene — keep image small and secrets out
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+node_modules
+npm-debug.log*
+.env
+.env.*
+!.env.example
+logs
+backups
+uploads
+tmp
+coverage
+docs
+*.md
+!DEPLOYMENT.md
+agent-transcripts
+scripts/test-*.js
+docker-compose.override.yml

@@ -4,6 +4,7 @@ const logger = require("./utils/logger");
 const adminRoutes = require("./api/routes/admin.routes");
 const pricingRoutes = require("./api/routes/pricing.routes");
 const adminPricingRoutes = require("./api/routes/admin.pricing.routes");
+const prisma = require("./config/prisma");
 
 // Prisma BigInt (telegramId) maydonlarini JSON.stringify to'g'ri serializatsiya qilishi uchun
 BigInt.prototype.toJSON = function () {
@@ -14,8 +15,33 @@ function createApp(bot) {
   const app = express();
   app.use(express.json());
 
-  app.get("/health", (req, res) => {
-    res.json({ status: "ok", time: new Date().toISOString() });
+  app.get("/health", async (req, res) => {
+    const payload = {
+      status: "ok",
+      service: "nodexrent-bot",
+      time: new Date().toISOString(),
+      uptimeSec: Math.floor(process.uptime()),
+      mode: env.BOT_MODE,
+    };
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      payload.db = "up";
+      return res.status(200).json(payload);
+    } catch (err) {
+      payload.status = "degraded";
+      payload.db = "down";
+      payload.error = err.message;
+      return res.status(503).json(payload);
+    }
+  });
+
+  app.get("/ready", async (req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return res.status(200).json({ ready: true });
+    } catch {
+      return res.status(503).json({ ready: false });
+    }
   });
 
   app.use("/api/admin", adminRoutes);

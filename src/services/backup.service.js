@@ -13,20 +13,36 @@ function ensureBackupDir() {
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
+function parseDatabaseUrl(databaseUrl) {
+  // Prisma URL: postgresql://user:pass@host:port/db?schema=playstation_rental
+  const normalized = String(databaseUrl || "").replace(/^postgresql:/i, "http:");
+  const dbUrl = new URL(normalized);
+  const dbName = dbUrl.pathname.replace(/^\//, "").split("?")[0];
+  return {
+    user: decodeURIComponent(dbUrl.username || "postgres"),
+    password: decodeURIComponent(dbUrl.password || ""),
+    host: dbUrl.hostname || "localhost",
+    port: dbUrl.port || "5432",
+    dbName,
+    schema: dbUrl.searchParams.get("schema") || "playstation_rental",
+  };
+}
+
 async function createBackup(adminContext = {}) {
   ensureBackupDir();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `backup-${timestamp}.sql`;
   const filePath = path.join(BACKUP_DIR, filename);
 
-  const dbUrl = new URL(env.DATABASE_URL.replace("postgresql://", "http://"));
-  const dbName = dbUrl.pathname.replace("/", "").split("?")[0];
-  const user = dbUrl.username;
-  const host = dbUrl.searchParams.get("host") || "/var/run/postgresql";
+  const { user, password, host, port, dbName, schema } = parseDatabaseUrl(env.DATABASE_URL);
 
-  await execFileAsync("pg_dump", ["-U", user, "-h", host, "-d", dbName, "-n", "playstation_rental", "-f", filePath], {
-    env: { ...process.env, PGPASSWORD: dbUrl.password || "" },
-  });
+  await execFileAsync(
+    "pg_dump",
+    ["-U", user, "-h", host, "-p", String(port), "-d", dbName, "-n", schema, "-f", filePath],
+    {
+      env: { ...process.env, PGPASSWORD: password },
+    }
+  );
 
   const stat = fs.statSync(filePath);
   const record = await prisma.databaseBackup.create({
@@ -61,4 +77,4 @@ async function getBackupFile(id) {
   return backup;
 }
 
-module.exports = { createBackup, listBackups, getBackupFile, BACKUP_DIR };
+module.exports = { createBackup, listBackups, getBackupFile, BACKUP_DIR, parseDatabaseUrl };
