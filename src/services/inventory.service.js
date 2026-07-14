@@ -215,23 +215,55 @@ async function releaseUnit(orderId, tx = null) {
 function formatInventoryMenu(counts) {
   const lines = ["🎮 <b>PlayStation inventar boshqaruvi</b>", ""];
   for (const t of ["PS3", "PS4", "PS5"]) {
-    const c = counts[t];
-    const occupied = (c.reserved ?? 0) + (c.rented ?? 0);
-    const occ =
-      c.occupancyRate != null
-        ? `${c.occupancyRate}%`
-        : c.total
-          ? `${Math.round((occupied / c.total) * 100)}%`
-          : "0%";
-    lines.push(
-      `<b>${t}</b> — Jami: ${c.total} | Bo'sh: ${c.available} | Bron: ${c.reserved ?? 0} | Ijara: ${c.rented ?? 0}`
-    );
-    lines.push(
-      `  Tekshiruv: ${c.inspection ?? 0} | Ta'mir: ${c.maintenance ?? 0} | Occupancy: ${occ}`
-    );
+    const c = counts[t] || {};
+    lines.push(`<b>${t}</b> — Jami: ${c.total ?? 0}`);
   }
-  lines.push("", "Sonni o'zgartirish uchun modelni tanlang.");
+  lines.push("", "Modelni tanlang — statistika va qurilmalar ochiladi.");
   return lines.join("\n");
+}
+
+/**
+ * True if at least one AVAILABLE InventoryUnit exists for the model.
+ * Used to block new orders when all units are band.
+ */
+async function hasAvailableUnit(consoleType) {
+  const n = await prisma.inventoryUnit.count({
+    where: { consoleType, status: AssetStatus.AVAILABLE },
+  });
+  return n > 0;
+}
+
+/**
+ * Soft availability for order creation.
+ * Also ensures reserved+rented never conceptually exceed total for booking.
+ */
+async function assertCanAcceptOrder(consoleType) {
+  const stats = await inventoryAssetService.getStatistics({ model: consoleType });
+  const total = stats.totalUnits || 0;
+  const available = stats.available || 0;
+  const reserved = stats.reserved || 0;
+  const rented = stats.rented || 0;
+
+  if (total === 0 || available === 0) {
+    const err = new Error(
+      `❌ Hozircha barcha ${consoleType} qurilmalari band.\n` +
+        `Iltimos boshqa modelni tanlang yoki keyinroq urinib ko'ring.`
+    );
+    err.code = "NO_AVAILABLE_UNITS";
+    err.messageKey = "orderErrors.noStock";
+    throw err;
+  }
+
+  if (reserved + rented > total) {
+    const err = new Error(
+      `❌ Inventar nomuvofiqligi (${consoleType}). Admin bilan bog'laning.`
+    );
+    err.code = "INVENTORY_INVARIANT";
+    err.messageKey = "orderErrors.noStock";
+    throw err;
+  }
+
+  return { total, available, reserved, rented };
 }
 
 module.exports = {
@@ -245,4 +277,6 @@ module.exports = {
   releaseUnit,
   formatInventoryMenu,
   logHistory,
+  hasAvailableUnit,
+  assertCanAcceptOrder,
 };

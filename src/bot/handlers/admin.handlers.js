@@ -55,6 +55,7 @@ const factoryResetService = require("../../services/factoryReset.service");
 const { registerAdminBackupHandlers, backupKeyboard } = require("./admin.backup.handlers");
 const { registerAdminAuditHandlers } = require("./admin.audit.handlers");
 const adminInventoryItem = require("./admin.inventoryItem.handlers");
+const adminInventory = require("./admin.inventory.handlers");
 const { label, filterGroup } = require("../../constants/orderStatus");
 const { buildOrderTimeline } = require("../../utils/orderTimeline");
 const { escapeHtml } = require("../../utils/telegramFormat");
@@ -146,6 +147,7 @@ function register(bot) {
     if (!(await isAdmin(telegramId))) return;
 
     if (await adminInventoryItem.handleText(bot, msg)) return;
+    if (await adminInventory.handleText(bot, msg, { telegramId })) return;
 
     let session = sessionStore.getSession(chatId);
 
@@ -219,24 +221,13 @@ function register(bot) {
     if (await handleCrmAdminMessage(bot, chatId, msg, session)) return;
 
     if (session.step === "admin:inv:set") {
-      const consoleType = session.data._consoleType;
-      const target = Number(msg.text.trim());
-      try {
-        const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
-        await inventoryService.setCount(consoleType, target, {
-          telegramId,
-          adminId: adminRecord?.id,
-        });
-        sessionStore.clearSession(chatId);
-        const counts = await inventoryService.getCountsByType();
-        await bot.sendMessage(chatId, `✅ ${consoleType} soni ${target} taga o'rnatildi.`, {
-          parse_mode: "HTML",
-          ...adminKeyboards.inventoryTypeKeyboard(),
-        });
-        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(counts), { parse_mode: "HTML" });
-      } catch (err) {
-        await bot.sendMessage(chatId, `❌ ${err.message}`);
-      }
+      // Legacy path — redirect to unit-based inventory
+      sessionStore.clearSession(chatId);
+      await bot.sendMessage(
+        chatId,
+        "ℹ️ Sonni qo'lda o'zgartirish o'chirilgan.\nModelni tanlab «➕ Qurilma qo'shish» dan foydalaning."
+      );
+      await adminInventory.sendOverview(bot, chatId);
       return;
     }
 
@@ -422,14 +413,10 @@ function register(bot) {
       }
       case "🎮 Inventar":
       case "🎮 PlayStationlar": {
-        const counts = await inventoryService.getCountsByType();
-        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(counts), {
-          parse_mode: "HTML",
-          ...adminKeyboards.inventoryTypeKeyboard(),
-        });
+        await adminInventory.sendOverview(bot, chatId);
         await bot.sendMessage(
           chatId,
-          "📦 Professional inventar (Console / Joystick / HDMI / Power):",
+          "📦 Professional inventar (Joystick / HDMI / Power):",
           adminInventoryItem.typeKeyboard()
         );
         return;
@@ -513,6 +500,7 @@ function register(bot) {
     }
 
     if (await adminInventoryItem.handleCallback(bot, query, data)) return true;
+    if (await adminInventory.handleCallback(bot, query, data, { telegramId })) return true;
 
     if (data === "admin:promo:new") {
       sessionStore.setStep(chatId, "admin:promo:code");
@@ -652,25 +640,6 @@ function register(bot) {
       return true;
     }
 
-    if (data === "admin:inv:units") {
-      const units = await prisma.inventoryUnit.findMany({ orderBy: { unitCode: "asc" }, take: 30 });
-      const rows = units.map((u) => [{ text: u.unitCode, callback_data: `admin:inv:unit:${u.id}` }]);
-      await bot.sendMessage(chatId, "📋 <b>Inventar qurilmalar</b>", {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: rows },
-      });
-      await safeAnswerCallbackQuery(bot, query.id);
-      return true;
-    }
-
-    if (data.startsWith("admin:inv:unit:")) {
-      const unitId = Number(data.split(":")[3]);
-      const unit = await inventoryService.getUnitById(unitId);
-      await bot.sendMessage(chatId, inventoryService.formatUnitDetail(unit), { parse_mode: "HTML" });
-      await safeAnswerCallbackQuery(bot, query.id);
-      return true;
-    }
-
     if (data.startsWith("admin:orders:filter:")) {
       const filterKey = data.split(":")[3];
       const group = filterGroup(filterKey);
@@ -700,35 +669,6 @@ function register(bot) {
       const order = await orderService.getOrderById(orderId);
       if (order) {
         await bot.sendMessage(chatId, buildOrderTimeline(order), { parse_mode: "HTML" });
-      }
-      await safeAnswerCallbackQuery(bot, query.id);
-      return true;
-    }
-
-    if (data.startsWith("admin:inv:")) {
-      const [, , consoleType, action] = data.split(":");
-      const adminRecord = await prisma.admin.findUnique({ where: { telegramId: BigInt(telegramId) } });
-      const ctx = { telegramId, adminId: adminRecord?.id };
-      try {
-        const counts = await inventoryService.getCountsByType();
-        const current = counts[consoleType]?.total ?? 0;
-        if (action === "inc") {
-          await inventoryService.setCount(consoleType, current + 1, ctx);
-        } else if (action === "dec") {
-          await inventoryService.setCount(consoleType, current - 1, ctx);
-        } else if (action === "set") {
-          sessionStore.setStep(chatId, "admin:inv:set");
-          sessionStore.updateData(chatId, { _consoleType: consoleType });
-          await bot.sendMessage(chatId, `${consoleType} uchun yangi jami sonni kiriting (hozir: ${current}):`);
-          await safeAnswerCallbackQuery(bot, query.id);
-          return true;
-        } else if (action === "refresh") {
-          // noop
-        }
-        const updated = await inventoryService.getCountsByType();
-        await bot.sendMessage(chatId, inventoryService.formatInventoryMenu(updated), { parse_mode: "HTML" });
-      } catch (err) {
-        await bot.sendMessage(chatId, `❌ ${err.message}`);
       }
       await safeAnswerCallbackQuery(bot, query.id);
       return true;

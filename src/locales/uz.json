@@ -229,6 +229,7 @@
     "priceGone": "Tanlangan ijara narxi endi mavjud emas",
     "priceMismatch": "Tanlangan narx konsol turiga mos kelmaydi",
     "consoleGone": "Tanlangan konsol hozir mavjud emas",
+    "noStock": "❌ Hozircha barcha {{model}} qurilmalari band.\nIltimos boshqa modelni tanlang yoki keyinroq urinib ko'ring.",
     "noAddress": "Manzil ko'rsatilmagan",
     "activeOrderExists": "❌ Sizda hali yakunlanmagan buyurtma mavjud. Yangi buyurtma berishdan oldin mavjud buyurtmangizni yakunlang yoki bekor qiling."
   },

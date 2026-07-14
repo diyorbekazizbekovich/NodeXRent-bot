@@ -90,6 +90,18 @@ async function handleConsoleSelect(bot, chatId, consoleType) {
       return start(bot, chatId);
     }
 
+    // Block if no AVAILABLE physical units
+    const inventoryService = require("../../services/inventory.service");
+    try {
+      await inventoryService.assertCanAcceptOrder(code);
+    } catch (stockErr) {
+      await bot.sendMessage(
+        chatId,
+        stockErr.messageKey ? t(stockErr.messageKey, L, { model: code }) : stockErr.message
+      );
+      return start(bot, chatId);
+    }
+
     const options = await pricingService.getAvailableRentalOptions(code);
     sessionStore.updateData(chatId, { consoleType: code });
     sessionStore.setStep(chatId, STEPS.RENTAL);

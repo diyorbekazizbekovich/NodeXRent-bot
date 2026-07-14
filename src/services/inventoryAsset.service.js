@@ -573,16 +573,9 @@ async function getStatistics({ model } = {}) {
     });
     const counts = buildStatusCounts(grouped.map((g) => ({ status: g.status, _count: g._count })));
 
-    const activeUnits =
-      counts.available +
-      counts.reserved +
-      counts.rented +
-      counts.inspection +
-      counts.maintenance;
-
     const occupancyRate =
-      activeUnits > 0
-        ? Math.round(((counts.reserved + counts.rented) / activeUnits) * 10000) / 100
+      counts.total > 0
+        ? Math.round(((counts.reserved + counts.rented) / counts.total) * 10000) / 100
         : 0;
 
     const completedOrders = await prisma.order.findMany({

@@ -70,14 +70,19 @@ async function completeHandover({
   if (jsIds.length !== 4) {
     throw new DeliveryHandoverError("JOYSTICKS", "Aniq 4 ta joystick tanlanishi shart");
   }
-  if (!consoleItemId || !hdmiItemId || !powerItemId) {
-    throw new DeliveryHandoverError("INVENTORY", "Konsol, HDMI va Power majburiy");
+  if (!hdmiItemId || !powerItemId) {
+    throw new DeliveryHandoverError("INVENTORY", "HDMI va Power majburiy");
   }
   if (!photoFileId) {
     throw new DeliveryHandoverError("PHOTO", "Mijoz + shartnoma surati majburiy");
   }
 
-  const allItemIds = [Number(consoleItemId), ...jsIds, Number(hdmiItemId), Number(powerItemId)];
+  const allItemIds = [
+    ...(consoleItemId ? [Number(consoleItemId)] : []),
+    ...jsIds,
+    Number(hdmiItemId),
+    Number(powerItemId),
+  ];
   if (new Set(allItemIds).size !== allItemIds.length) {
     throw new DeliveryHandoverError("DUPLICATE_ITEMS", "Bir xil inventar ikki marta tanlangan");
   }
@@ -90,6 +95,7 @@ async function completeHandover({
         courier: true,
         rentalPrice: { include: { consoleCatalog: true } },
         promocode: true,
+        inventoryUnit: true,
       },
     });
 
@@ -104,12 +110,16 @@ async function completeHandover({
       throw new DeliveryHandoverError("INVALID_STATUS", `Noto'g'ri holat: ${order.status}`);
     }
 
-    const consoleItem = await tx.inventoryItem.findUnique({ where: { id: Number(consoleItemId) } });
-    if (!consoleItem || consoleItem.itemType !== ITEM_TYPES.CONSOLE) {
-      throw new DeliveryHandoverError("CONSOLE", "Konsol topilmadi");
-    }
-    if (consoleItem.consoleType !== order.consoleType) {
-      throw new DeliveryHandoverError("CONSOLE_TYPE", "Konsol turi buyurtmaga mos emas");
+    // Legacy optional CONSOLE InventoryItem — primary console is InventoryUnit
+    let consoleItem = null;
+    if (consoleItemId) {
+      consoleItem = await tx.inventoryItem.findUnique({ where: { id: Number(consoleItemId) } });
+      if (!consoleItem || consoleItem.itemType !== ITEM_TYPES.CONSOLE) {
+        throw new DeliveryHandoverError("CONSOLE", "Konsol topilmadi");
+      }
+      if (consoleItem.consoleType !== order.consoleType) {
+        throw new DeliveryHandoverError("CONSOLE_TYPE", "Konsol turi buyurtmaga mos emas");
+      }
     }
 
     const joysticks = await tx.inventoryItem.findMany({ where: { id: { in: jsIds } } });
@@ -156,7 +166,7 @@ async function completeHandover({
         collateralReturned: false,
         deliveredByCourierId: Number(courierId),
         deliveryCompletedAt: now,
-        consoleItemId: consoleItem.id,
+        consoleItemId: consoleItem?.id ?? null,
         hdmiItemId: hdmi.id,
         powerItemId: power.id,
       },
@@ -223,7 +233,7 @@ async function completeHandover({
     });
 
     const roles = [
-      { id: consoleItem.id, role: ITEM_TYPES.CONSOLE },
+      ...(consoleItem ? [{ id: consoleItem.id, role: ITEM_TYPES.CONSOLE }] : []),
       ...joysticks.map((j) => ({ id: j.id, role: ITEM_TYPES.JOYSTICK })),
       { id: hdmi.id, role: ITEM_TYPES.HDMI },
       { id: power.id, role: ITEM_TYPES.POWER },

@@ -47,31 +47,34 @@ async function startHandoverWizard(bot, chatId, orderId) {
     return;
   }
 
-  sessionStore.setStep(chatId, STEPS.CONSOLE);
+  // Console = InventoryUnit (asset). Professional inventarda Console yo'q —
+  // handover accessory kit (joystick/HDMI/power) dan boshlanadi.
+  const unitLabel = order.inventoryUnit?.unitCode || order.consoleType || "—";
   patchHw(chatId, {
     _hwOrderId: orderId,
-    _hwConsoleId: null,
+    _hwConsoleId: null, // optional legacy InventoryItem CONSOLE
     _hwJoystickIds: [],
     _hwHdmiId: null,
     _hwPowerId: null,
     _hwCollateral: null,
     _hwPayment: null,
-  });
-
-  const consoles = await inventoryItemService.listAvailable(ITEM_TYPES.CONSOLE, {
-    consoleType: order.consoleType,
-    reservedOrderId: orderId,
+    _hwUnitCode: unitLabel,
   });
 
   await bot.sendMessage(
     chatId,
     `📍 Topshirish wizard (#${orderId})\n\n` +
-      `1️⃣ Qaysi PlayStation topshirilmoqda?\n` +
-      `(Faqat AVAILABLE / ushbu order uchun RESERVED)`,
-    invKb.consolePickKeyboard(orderId, consoles)
+      `🎮 Konsol (InventoryUnit): <b>${unitLabel}</b>\n` +
+      `Status: RESERVED → topshirishda RENTED\n\n` +
+      `Endi aksessuarlarni tanlang.`,
+    { parse_mode: "HTML" }
   );
 
-  await deliveryHandoverService.notifyAdminStep(orderId, "Yetib kelindi — topshirish wizard boshlandi");
+  await askJoysticks(bot, chatId, orderId);
+  await deliveryHandoverService.notifyAdminStep(
+    orderId,
+    `Yetib kelindi — topshirish (${unitLabel})`
+  );
 }
 
 async function askJoysticks(bot, chatId, orderId) {
@@ -317,7 +320,7 @@ async function handlePhotoMessage(bot, msg, courier) {
 
   const d = session.data;
   const orderId = d._hwOrderId;
-  if (!orderId || !d._hwConsoleId || !d._hwHdmiId || !d._hwPowerId || !d._hwCollateral || !d._hwPayment) {
+  if (!orderId || !d._hwHdmiId || !d._hwPowerId || !d._hwCollateral || !d._hwPayment) {
     await bot.sendMessage(
       chatId,
       "❗️ Wizard ma'lumotlari to'liq emas. «📍 Yetib keldim» orqali qaytadan boshlang."

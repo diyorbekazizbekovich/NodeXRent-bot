@@ -60,6 +60,10 @@ async function createOrder({
     throw err;
   }
 
+  // Physical stock: must have AVAILABLE InventoryUnit
+  const inventoryService = require("./inventory.service");
+  await inventoryService.assertCanAcceptOrder(consoleType);
+
   const timeValidation = validateStartDatetime(startDatetime);
   if (!timeValidation.valid) {
     const err = new Error(timeValidation.reason);

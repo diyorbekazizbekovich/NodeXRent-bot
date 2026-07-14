@@ -17,7 +17,6 @@ function typeKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "🎮 Console", callback_data: "admin:invitem:type:CONSOLE" }],
         [{ text: "🕹 Joystick", callback_data: "admin:invitem:type:JOYSTICK" }],
         [{ text: "📺 HDMI", callback_data: "admin:invitem:type:HDMI" }],
         [{ text: "🔌 Power", callback_data: "admin:invitem:type:POWER" }],
@@ -66,7 +65,9 @@ async function handleCallback(bot, query, data) {
 
   if (parts[2] === "list") {
     const items = await inventoryItemService.listByType(null, { take: 40 });
-    const lines = items.map(
+    // Console items removed from professional inventory UI — accessories only
+    const accessories = items.filter((i) => i.itemType !== ITEM_TYPES.CONSOLE);
+    const lines = accessories.map(
       (i) =>
         `• ${i.inventoryNumber} | ${labelItemType(i.itemType)} | ${i.status}` +
         (i.consoleType ? ` | ${i.consoleType}` : "")
@@ -77,23 +78,26 @@ async function handleCallback(bot, query, data) {
 
   if (parts[2] === "type") {
     const itemType = parts[3];
-    sessionStore.updateData(chatId, { _invItem: { itemType } });
     if (itemType === ITEM_TYPES.CONSOLE) {
-      sessionStore.setStep(chatId, STEPS.CONSOLE_TYPE);
-      await bot.sendMessage(chatId, "Console Type:", consoleTypeKeyboard());
-    } else {
-      sessionStore.setStep(chatId, STEPS.INV_NUM);
-      await bot.sendMessage(chatId, "Inventory Number (masalan NX-JS-001):");
+      await bot.sendMessage(
+        chatId,
+        "ℹ️ Console professional inventardan olib tashlandi.\n" +
+          "PlayStation qurilmalarini «🎮 Inventar» → PS3/PS4/PS5 orqali qo'shing."
+      );
+      return true;
     }
+    sessionStore.updateData(chatId, { _invItem: { itemType } });
+    sessionStore.setStep(chatId, STEPS.INV_NUM);
+    await bot.sendMessage(chatId, "Inventory Number (masalan NX-JS-001):");
     return true;
   }
 
+  // Legacy console-type step — redirect away
   if (parts[2] === "ctype") {
-    const consoleType = parts[3];
-    const inv = sessionStore.getSession(chatId).data._invItem || {};
-    sessionStore.updateData(chatId, { _invItem: { ...inv, consoleType } });
-    sessionStore.setStep(chatId, STEPS.INV_NUM);
-    await bot.sendMessage(chatId, "Inventory Number (masalan NX-PS5-001):");
+    await bot.sendMessage(
+      chatId,
+      "ℹ️ Console qo'shish o'chirilgan. PS modelini Inventar menyusidan tanlang."
+    );
     return true;
   }
 

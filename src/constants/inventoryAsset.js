@@ -27,6 +27,7 @@ const ALLOWED_TRANSITIONS = Object.freeze({
   [AssetStatus.RENTED]: [AssetStatus.INSPECTION],
   [AssetStatus.INSPECTION]: [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE],
   [AssetStatus.MAINTENANCE]: [AssetStatus.AVAILABLE],
+  // Product alias REPAIR === MAINTENANCE (DB enum stays MAINTENANCE)
   [AssetStatus.DISABLED]: [AssetStatus.AVAILABLE],
   [AssetStatus.LOST]: [],
   // Legacy recovery paths (ops only)

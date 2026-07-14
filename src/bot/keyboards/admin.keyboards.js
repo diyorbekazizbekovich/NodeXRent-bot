@@ -19,25 +19,13 @@ function mainMenuKeyboard({ isSuperAdmin = false } = {}) {
 }
 
 function inventoryTypeKeyboard() {
+  // Model picker — counts come from DB units, not +/- buttons
   return {
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: "PS3 +", callback_data: "admin:inv:PS3:inc" },
-          { text: "PS3 −", callback_data: "admin:inv:PS3:dec" },
-          { text: "PS3 soni", callback_data: "admin:inv:PS3:set" },
-        ],
-        [
-          { text: "PS4 +", callback_data: "admin:inv:PS4:inc" },
-          { text: "PS4 −", callback_data: "admin:inv:PS4:dec" },
-          { text: "PS4 soni", callback_data: "admin:inv:PS4:set" },
-        ],
-        [
-          { text: "PS5 +", callback_data: "admin:inv:PS5:inc" },
-          { text: "PS5 −", callback_data: "admin:inv:PS5:dec" },
-          { text: "PS5 soni", callback_data: "admin:inv:PS5:set" },
-        ],
-        [{ text: "📋 Qurilmalar", callback_data: "admin:inv:units" }],
+        [{ text: "🎮 PS3", callback_data: "admin:inv:model:PS3" }],
+        [{ text: "🎮 PS4", callback_data: "admin:inv:model:PS4" }],
+        [{ text: "🎮 PS5", callback_data: "admin:inv:model:PS5" }],
         [{ text: "🔄 Yangilash", callback_data: "admin:inv:refresh" }],
       ],
     },
