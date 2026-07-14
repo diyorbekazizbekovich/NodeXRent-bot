@@ -740,9 +740,8 @@ ALTER TABLE "support_messages" ADD CONSTRAINT "support_messages_threadId_fkey" F
 -- AddForeignKey
 ALTER TABLE "support_messages" ADD CONSTRAINT "support_messages_senderAdminId_fkey" FOREIGN KEY ("senderAdminId") REFERENCES "admins"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
-[32m[0m
-[32m-- One occupying PlayStation per non-terminal order (race-safe assignment)[0m
-[32mCREATE UNIQUE INDEX "orders_unique_occupying_playstation"[0m
-[32mON "orders" ("playstationId")[0m
-[32mWHERE "playstationId" IS NOT NULL[0m
-[32m  AND status NOT IN ('CANCELLED', 'REJECTED', 'COMPLETED', 'RETURNED');[0m
+-- One occupying PlayStation per non-terminal order (race-safe assignment)
+CREATE UNIQUE INDEX "orders_unique_occupying_playstation"
+ON "orders" ("playstationId")
+WHERE "playstationId" IS NOT NULL
+  AND status NOT IN ('CANCELLED', 'REJECTED', 'COMPLETED', 'RETURNED');
