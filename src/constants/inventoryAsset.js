@@ -20,14 +20,14 @@ const AssetStatus = Object.freeze({
 const ALLOWED_TRANSITIONS = Object.freeze({
   [AssetStatus.AVAILABLE]: [
     AssetStatus.RESERVED,
+    AssetStatus.MAINTENANCE, // admin: to'g'ridan-to'g'ri ta'mirga
     AssetStatus.DISABLED,
     AssetStatus.LOST,
   ],
   [AssetStatus.RESERVED]: [AssetStatus.RENTED, AssetStatus.AVAILABLE],
   [AssetStatus.RENTED]: [AssetStatus.INSPECTION],
   [AssetStatus.INSPECTION]: [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE],
-  [AssetStatus.MAINTENANCE]: [AssetStatus.AVAILABLE],
-  // Product alias REPAIR === MAINTENANCE (DB enum stays MAINTENANCE)
+  [AssetStatus.MAINTENANCE]: [AssetStatus.AVAILABLE, AssetStatus.DISABLED],
   [AssetStatus.DISABLED]: [AssetStatus.AVAILABLE],
   [AssetStatus.LOST]: [],
   // Legacy recovery paths (ops only)
@@ -39,12 +39,11 @@ const ASSIGNABLE_STATUSES = Object.freeze([AssetStatus.AVAILABLE]);
 
 const OCCUPYING_STATUSES = Object.freeze([AssetStatus.RESERVED, AssetStatus.RENTED]);
 
-/** Must never be permanently deleted */
+/** Must never be permanently deleted while in active rental cycle */
 const NON_DELETABLE_STATUSES = Object.freeze([
   AssetStatus.RESERVED,
   AssetStatus.RENTED,
   AssetStatus.INSPECTION,
-  AssetStatus.MAINTENANCE,
 ]);
 
 /** Units counted in occupancy denominator (excludes DISABLED + LOST) */

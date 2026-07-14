@@ -411,9 +411,11 @@ async function updateAsset(id, data, adminContext = {}) {
 }
 
 /**
- * Soft-remove: AVAILABLE → DISABLED. Hard-delete only AVAILABLE (optional).
+ * Delete inventory unit.
+ * Hard-delete allowed for AVAILABLE / MAINTENANCE / DISABLED (not in active rental).
+ * Soft (default): → DISABLED when possible.
  */
-async function deleteAsset(id, { hard = false, adminContext = {} } = {}) {
+async function deleteAsset(id, { hard = true, adminContext = {} } = {}) {
   const unit = await prisma.inventoryUnit.findUnique({ where: { id: Number(id) } });
   if (!unit) {
     throw new InventoryAssetError("NOT_FOUND", "Inventar topilmadi");
@@ -422,18 +424,34 @@ async function deleteAsset(id, { hard = false, adminContext = {} } = {}) {
   if (isNonDeletable(unit.status)) {
     throw new InventoryAssetError(
       "DELETE_FORBIDDEN",
-      `${statusLabel(unit.status)} holatidagi qurilmani o'chirib bo'lmaydi — DISABLED qiling`
+      `${statusLabel(unit.status)} holatidagi qurilmani o'chirib bo'lmaydi (band/ijarada)`
     );
   }
 
+  const hardAllowed = [
+    AssetStatus.AVAILABLE,
+    AssetStatus.MAINTENANCE,
+    AssetStatus.DISABLED,
+    AssetStatus.MISSING_PARTS,
+    AssetStatus.DEFECTIVE,
+    AssetStatus.LOST,
+  ];
+
   if (hard) {
-    if (unit.status !== AssetStatus.AVAILABLE) {
+    if (!hardAllowed.includes(unit.status)) {
       throw new InventoryAssetError(
         "DELETE_FORBIDDEN",
-        "Faqat AVAILABLE inventarni butunlay o'chirish mumkin"
+        `Bu holatda o'chirib bo'lmaydi: ${statusLabel(unit.status)}`
       );
     }
-    await prisma.inventoryUnit.delete({ where: { id: unit.id } });
+    // Detach from historical orders (FK), then delete unit (+ history cascade)
+    await prisma.$transaction(async (tx) => {
+      await tx.order.updateMany({
+        where: { inventoryUnitId: unit.id },
+        data: { inventoryUnitId: null },
+      });
+      await tx.inventoryUnit.delete({ where: { id: unit.id } });
+    });
     await auditLogService.log({
       module: "INVENTORY",
       adminId: adminContext.adminId,
@@ -443,7 +461,7 @@ async function deleteAsset(id, { hard = false, adminContext = {} } = {}) {
       entityId: unit.id,
       beforeData: toDto(unit),
     });
-    return { deleted: true, id: unit.id };
+    return { deleted: true, id: unit.id, unitCode: unit.unitCode };
   }
 
   if (unit.status === AssetStatus.DISABLED) {

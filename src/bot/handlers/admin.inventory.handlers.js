@@ -226,19 +226,71 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
         return true;
       }
       const model = unit.model || unit.consoleType;
+      const canDelete = !["RESERVED", "RENTED", "INSPECTION"].includes(unit.status);
+      const rows = [
+        [
+          { text: "✅ Bo'sh", callback_data: `admin:inv:status:${unitId}:AVAILABLE` },
+          { text: "🔧 Ta'mir", callback_data: `admin:inv:status:${unitId}:MAINTENANCE` },
+        ],
+        [{ text: "🚫 DISABLED", callback_data: `admin:inv:status:${unitId}:DISABLED` }],
+      ];
+      if (canDelete) {
+        rows.push([
+          { text: "🗑 O'chirish", callback_data: `admin:inv:delete:${unitId}` },
+        ]);
+      }
+      rows.push([{ text: "⬅️ Ro'yxat", callback_data: `admin:inv:list:${model}` }]);
       await bot.sendMessage(chatId, inventoryService.formatUnitDetail(unit), {
         parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ AVAILABLE", callback_data: `admin:inv:status:${unitId}:AVAILABLE` },
-              { text: "🔧 Ta'mir", callback_data: `admin:inv:status:${unitId}:MAINTENANCE` },
-            ],
-            [{ text: "🚫 DISABLED", callback_data: `admin:inv:status:${unitId}:DISABLED` }],
-            [{ text: "⬅️ Ro'yxat", callback_data: `admin:inv:list:${model}` }],
-          ],
-        },
+        reply_markup: { inline_keyboard: rows },
       });
+      return true;
+    }
+
+    if (action === "delete") {
+      const unitId = Number(parts[3]);
+      const unit = await prisma.inventoryUnit.findUnique({ where: { id: unitId } });
+      if (!unit) {
+        await bot.sendMessage(chatId, "Qurilma topilmadi.");
+        return true;
+      }
+      await bot.sendMessage(
+        chatId,
+        `⚠️ <b>${unit.unitCode}</b> ni butunlay o'chirasizmi?\n` +
+          `Holat: ${STATUS_SHORT[unit.status] || unit.status}\n\n` +
+          `Bu amalni qaytarib bo'lmaydi.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Ha, o'chirish", callback_data: `admin:inv:deleteConfirm:${unitId}` },
+                { text: "❌ Bekor", callback_data: `admin:inv:unit:${unitId}` },
+              ],
+            ],
+          },
+        }
+      );
+      return true;
+    }
+
+    if (action === "deleteConfirm") {
+      const unitId = Number(parts[3]);
+      const adminRecord = await prisma.admin.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+      });
+      const unit = await prisma.inventoryUnit.findUnique({ where: { id: unitId } });
+      const model = unit?.consoleType;
+      const result = await inventoryAssetService.deleteAsset(unitId, {
+        hard: true,
+        adminContext: { adminId: adminRecord?.id, telegramId },
+      });
+      await bot.sendMessage(
+        chatId,
+        `🗑 O'chirildi: <b>${result.unitCode || unitId}</b>`,
+        { parse_mode: "HTML" }
+      );
+      if (model) await sendModelPage(bot, chatId, model);
       return true;
     }
 
@@ -273,10 +325,23 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
         note: `Admin → ${toStatus}`,
       });
       const unit = await inventoryService.getUnitById(unitId);
+      const model = unit.model || unit.consoleType;
+      const canDelete = !["RESERVED", "RENTED", "INSPECTION"].includes(unit.status);
+      const rows = [
+        [
+          { text: "✅ Bo'sh", callback_data: `admin:inv:status:${unitId}:AVAILABLE` },
+          { text: "🔧 Ta'mir", callback_data: `admin:inv:status:${unitId}:MAINTENANCE` },
+        ],
+        [{ text: "🚫 DISABLED", callback_data: `admin:inv:status:${unitId}:DISABLED` }],
+      ];
+      if (canDelete) {
+        rows.push([{ text: "🗑 O'chirish", callback_data: `admin:inv:delete:${unitId}` }]);
+      }
+      rows.push([{ text: "⬅️ Ro'yxat", callback_data: `admin:inv:list:${model}` }]);
       await bot.sendMessage(
         chatId,
         `✅ Status yangilandi.\n\n${inventoryService.formatUnitDetail(unit)}`,
-        { parse_mode: "HTML" }
+        { parse_mode: "HTML", reply_markup: { inline_keyboard: rows } }
       );
       return true;
     }
