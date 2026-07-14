@@ -81,7 +81,20 @@ openssl rand -base64 32
 
 ---
 
-## 2) First deploy (build + start)
+## Fresh DB / migration failed on Contabo?
+
+If logs show `NotificationType does not exist` or `P3009` failed migration on a **new empty** server:
+
+```bash
+cd /opt/nodexrent
+docker compose down -v          # wipes empty broken volumes (OK for first deploy)
+git pull
+git checkout cursor/production-docker-deploy
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+The repo now ships a single baseline migration (`20260714000000_init`) that creates the full schema.
 
 ```bash
 cd /opt/nodexrent
