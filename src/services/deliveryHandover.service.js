@@ -165,10 +165,21 @@ async function completeHandover({
       throw new DeliveryHandoverError("ALREADY_DONE", "Buyurtma allaqachon topshirilgan");
     }
 
-    // ACTIVE = faol ijara (talab: ACTIVE RENTAL)
+    // ACTIVE = faol ijara (ACTIVE_RENTAL)
+    const rentalReturnService = require("./rentalReturn.service");
+    const { rentalStartAt, expectedReturnAt } = rentalReturnService.computeRentalWindow(
+      order,
+      now
+    );
+
     await tx.order.update({
       where: { id: order.id },
-      data: { status: "ACTIVE" },
+      data: {
+        status: "ACTIVE",
+        rentalStartAt,
+        expectedReturnAt,
+        endDatetime: expectedReturnAt,
+      },
     });
 
     // Device: RESERVED → RENTED (synced with ACTIVE)
@@ -195,7 +206,19 @@ async function completeHandover({
         status: "ACTIVE",
         actorType: "courier",
         actorId: Number(courierId),
-        note: "Rental ACTIVE",
+        note: `Rental ACTIVE until ${expectedReturnAt.toISOString()}`,
+      },
+    });
+
+    await rentalReturnService.logRentalAudit({
+      action: "DELIVERED_RENTAL_STARTED",
+      orderId: order.id,
+      inventoryUnitId: order.inventoryUnitId,
+      actorType: "courier",
+      actorId: courierId,
+      extra: {
+        rentalStartAt: rentalStartAt.toISOString(),
+        expectedReturnAt: expectedReturnAt.toISOString(),
       },
     });
 
@@ -379,7 +402,9 @@ async function notifyHandoverComplete(order, meta, contract) {
 }
 
 /**
- * Qaytarib olish — faqat shu order inventari.
+ * Courier pickup after RETURN_REQUESTED / RETURN_ASSIGNED.
+ * Order → PICKED_UP; InventoryUnit stays RENTED until admin inspection.
+ * Does NOT complete the order.
  */
 async function completeReturn({
   orderId,
@@ -400,6 +425,9 @@ async function completeReturn({
     throw new DeliveryHandoverError("PHOTO", "Qaytarish surati majburiy");
   }
 
+  const rentalReturnService = require("./rentalReturn.service");
+  const { OrderStatus } = require("../constants/orderStatus");
+
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: Number(orderId) },
@@ -417,26 +445,25 @@ async function completeReturn({
     if (order.courierId !== Number(courierId)) {
       throw new DeliveryHandoverError("FORBIDDEN", "Bu buyurtma sizga tegishli emas");
     }
-    if (!["DELIVERED", "ACTIVE", "RETURN_REQUESTED", "ARRIVED", "EXPIRED"].includes(order.status)) {
-      throw new DeliveryHandoverError("INVALID_STATUS", `Qaytarib bo'lmaydi: ${order.status}`);
-    }
-    if (order.status === "COMPLETED" || order.status === "RETURNED") {
-      throw new DeliveryHandoverError("ALREADY_DONE", "Allaqachon yakunlangan");
+    if (order.status === "COMPLETED" || order.status === "PICKED_UP") {
+      throw new DeliveryHandoverError("ALREADY_DONE", "Allaqachon olib ketilgan / yakunlangan");
     }
 
+    try {
+      rentalReturnService.assertPickupAllowed(order, courierId);
+    } catch (err) {
+      if (err.code === "RENTAL_NOT_ENDED" || err.message?.includes("tugamagan")) {
+        throw new DeliveryHandoverError("RENTAL_NOT_ENDED", "Ijara muddati hali tugamagan.");
+      }
+      throw new DeliveryHandoverError(err.code || "INVALID_STATUS", err.message);
+    }
+
+    // Kit items returned with console — release item locks; console asset stays RENTED
     const itemIds = order.orderItems.map((l) => l.inventoryItemId);
     await inventoryItemService.releaseItems(tx, itemIds, {
       orderId: order.id,
       actorId: Number(courierId),
       condition: returnCondition,
-    });
-
-    const orderResourceService = require("./orderResource.service");
-    await orderResourceService.releaseOrderResources(tx, order, {
-      actorType: "courier",
-      actorId: courierId,
-      reason: "COMPLETE_RETURN",
-      releaseItems: false,
     });
 
     const now = new Date();
@@ -454,10 +481,11 @@ async function completeReturn({
     await tx.order.update({
       where: { id: order.id },
       data: {
-        status: "COMPLETED",
+        status: OrderStatus.PICKED_UP,
         collateralReturned,
         returnCondition,
         returnNote: returnNote || null,
+        pickedUpAt: now,
         returnedAt: now,
       },
     });
@@ -465,23 +493,23 @@ async function completeReturn({
     await tx.orderStatusLog.create({
       data: {
         orderId: order.id,
-        status: "RETURNED",
+        status: OrderStatus.PICKED_UP,
         actorType: "courier",
         actorId: Number(courierId),
-        note: "Inventory returned",
-      },
-    });
-    await tx.orderStatusLog.create({
-      data: {
-        orderId: order.id,
-        status: "COMPLETED",
-        actorType: "courier",
-        actorId: Number(courierId),
-        note: "Rental completed",
+        note: "Courier picked up — awaiting admin inspection",
       },
     });
 
+    // InventoryUnit MUST stay RENTED (admin inspection next)
     return order;
+  });
+
+  await rentalReturnService.logRentalAudit({
+    action: "COURIER_PICKED_UP",
+    orderId: result.id,
+    inventoryUnitId: result.inventoryUnitId,
+    actorType: "courier",
+    actorId: courierId,
   });
 
   if (bot && photoFileId) {
@@ -497,14 +525,34 @@ async function completeReturn({
     }
   }
 
-  const full = await orderRepository.findById(orderId);
-  await notifyReturnComplete(full, {
-    collateralReturned,
-    returnCondition,
-    returnNote,
-  });
+  try {
+    const { getAdminRecipients } = require("../utils/adminRecipients");
+    const admins = await getAdminRecipients();
+    for (const a of admins) {
+      await notify({
+        orderId: result.id,
+        type: "ORDER_RETURNED",
+        recipientType: "admin",
+        recipientId: a.telegramId,
+        message:
+          `📦 Kuryer olib keldi #${result.id}\n` +
+          `Status: PICKED_UP\n` +
+          `Admin tekshiruvi kutilmoqda (AVAILABLE / MAINTENANCE).`,
+      });
+    }
+  } catch (err) {
+    logger.warn("Pickup admin notify failed", { error: err.message });
+  }
 
-  return full;
+  return prisma.order.findUnique({
+    where: { id: Number(orderId) },
+    include: {
+      user: true,
+      courier: true,
+      rentalPrice: { include: { consoleCatalog: true } },
+      inventoryUnit: true,
+    },
+  });
 }
 
 async function notifyReturnComplete(order, meta) {

@@ -355,12 +355,16 @@ async function handlePhotoMessage(bot, msg, courier) {
     });
 
     sessionStore.clearSession(chatId);
+    const end = updated.expectedReturnAt || updated.endDatetime;
+    const { formatRemainingDuration } = require("../../utils/dateHelper");
+    const remaining = formatRemainingDuration(end);
     await bot.sendMessage(
       chatId,
       `✅ Topshirish muvaffaqiyatli yakunlandi.\n\n` +
-        `Buyurtma #${orderId} faol ijaraga o'tkazildi.\n` +
+        `Buyurtma #${orderId} — faol ijara.\n` +
+        `⏳ Ijara tugashiga: ${remaining}\n` +
         `Status: ${updated.status}`,
-      courierKeyboards.deliveredKeyboard(orderId)
+      courierKeyboards.activeRentalKeyboard(orderId, remaining)
     );
   } catch (err) {
     patchHw(chatId, { _hwPhotoProcessing: false, _hwAwaitPhoto: true });

@@ -24,11 +24,23 @@ async function startReturnWizard(bot, chatId, orderId) {
     await bot.sendMessage(chatId, "Buyurtma topilmadi");
     return;
   }
+
+  const rentalReturnService = require("../../services/rentalReturn.service");
+  const { COURIER_RETURN_ALLOWED_STATUSES } = require("../../constants/orderStatus");
+  if (!COURIER_RETURN_ALLOWED_STATUSES.includes(order.status)) {
+    if (["ACTIVE", "DELIVERED"].includes(order.status)) {
+      await bot.sendMessage(chatId, "❌ Ijara muddati hali tugamagan.");
+    } else {
+      await bot.sendMessage(chatId, `Bu holatda qaytarib bo'lmaydi: ${order.status}`);
+    }
+    return;
+  }
+
   if (!order.orderItems?.length) {
     await bot.sendMessage(
       chatId,
       `❗️ Buyurtma #${orderId} uchun inventar bog'lanmagan.\n` +
-        `Eski buyurtmalar uchun oddiy yakunlash ishlatiladi.`
+        `Eski buyurtmalar uchun admin tekshiruvi orqali yakunlang.`
     );
     return false;
   }
@@ -215,7 +227,9 @@ async function handlePhotoMessage(bot, msg, courier) {
     sessionStore.clearSession(chatId);
     await bot.sendMessage(
       chatId,
-      `✅ Qaytarish yakunlandi!\nBuyurtma #${orderId} — ${updated.status}\nInventar AVAILABLE holatiga qaytdi.`
+      `✅ Qurilma olib olindi!\n` +
+        `Buyurtma #${orderId} — ${updated.status}\n` +
+        `Admin tekshiruvi kutilmoqda (inventar hali RENTED).`
     );
   } catch (err) {
     sessionStore.updateData(chatId, { _retPhotoProcessing: false, _retAwaitPhoto: true });

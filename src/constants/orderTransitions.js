@@ -42,24 +42,30 @@ const ORDER_TRANSITIONS = Object.freeze({
   [OrderStatus.DELIVERED]: Object.freeze([
     OrderStatus.ACTIVE,
     OrderStatus.RETURN_REQUESTED,
-    OrderStatus.RETURNED,
-    OrderStatus.COMPLETED,
     OrderStatus.EXPIRED,
+    OrderStatus.CANCELLED,
   ]),
   [OrderStatus.ACTIVE]: Object.freeze([
     OrderStatus.RETURN_REQUESTED,
-    OrderStatus.RETURNED,
-    OrderStatus.COMPLETED,
     OrderStatus.EXPIRED,
-  ]),
-  [OrderStatus.RETURN_REQUESTED]: Object.freeze([
-    OrderStatus.RETURNED,
-    OrderStatus.COMPLETED,
-    OrderStatus.EXPIRED,
+    OrderStatus.CANCELLED,
   ]),
   [OrderStatus.EXPIRED]: Object.freeze([
-    OrderStatus.RETURNED,
+    OrderStatus.RETURN_REQUESTED,
+    OrderStatus.RETURN_ASSIGNED,
+  ]),
+  [OrderStatus.RETURN_REQUESTED]: Object.freeze([
+    OrderStatus.RETURN_ASSIGNED,
+    OrderStatus.PICKED_UP, // same courier may collect without re-assign
+    OrderStatus.EXPIRED,
+  ]),
+  [OrderStatus.RETURN_ASSIGNED]: Object.freeze([
+    OrderStatus.PICKED_UP,
+    OrderStatus.RETURN_REQUESTED, // requeue
+  ]),
+  [OrderStatus.PICKED_UP]: Object.freeze([
     OrderStatus.COMPLETED,
+    OrderStatus.RETURNED,
   ]),
   [OrderStatus.RETURNED]: Object.freeze([OrderStatus.COMPLETED]),
   [OrderStatus.COMPLETED]: Object.freeze([]),
@@ -71,7 +77,6 @@ const TERMINAL_STATUSES = Object.freeze([
   OrderStatus.COMPLETED,
   OrderStatus.CANCELLED,
   OrderStatus.REJECTED,
-  OrderStatus.RETURNED,
 ]);
 
 /** Pool statuses: waiting for a courier to claim */

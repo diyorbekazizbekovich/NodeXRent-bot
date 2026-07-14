@@ -28,15 +28,35 @@ function registerDashboardRoutes(router) {
 
   router.get("/inventory", requireRole("admin"), async (req, res) => {
     try {
+      // Prefer rich dynamic statistics; keep response backward compatible
+      const inventoryAssetService = require("../../services/inventoryAsset.service");
+      const stats = await inventoryAssetService.getStatistics();
       const counts = await inventoryService.getCountsByType();
-      res.json(counts);
+      res.json({ ...counts, statistics: stats });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
 
+  router.put("/inventory/count/:consoleType", requireRole("admin"), async (req, res) => {
+    try {
+      const { count } = req.body;
+      const counts = await inventoryService.setCount(req.params.consoleType, count, {
+        telegramId: req.auth?.telegramId,
+        adminId: req.auth?.adminId,
+      });
+      res.json(counts);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Backward-compatible alias
   router.put("/inventory/:consoleType", requireRole("admin"), async (req, res) => {
     try {
+      if (!["PS3", "PS4", "PS5"].includes(req.params.consoleType)) {
+        return res.status(404).json({ error: "Not found" });
+      }
       const { count } = req.body;
       const counts = await inventoryService.setCount(req.params.consoleType, count, {
         telegramId: req.auth?.telegramId,

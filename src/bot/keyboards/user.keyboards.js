@@ -13,7 +13,8 @@ function mainMenuKeyboard(lang) {
     reply_markup: {
       keyboard: [
         [t("menu.order", L), t("menu.myOrders", L)],
-        [t("menu.extend", L), t("menu.changeAddress", L)],
+        [t("menu.extend", L), t("menu.returnReady", L)],
+        [t("menu.changeAddress", L)],
         [t("menu.help", L), t("menu.language", L)],
       ],
       resize_keyboard: true,

@@ -34,7 +34,7 @@ async function requestExtension(orderId, userId, extraHours, lang) {
     );
   }
 
-  if (new Date(order.endDatetime).getTime() <= Date.now()) {
+  if (new Date(order.expectedReturnAt || order.endDatetime).getTime() <= Date.now()) {
     throwI18n("extendErrors.ended", "Ijara muddati allaqachon tugagan — uzaytirib bo'lmaydi");
   }
 
@@ -132,6 +132,7 @@ async function approveExtension(extensionId, adminContext = {}) {
       where: { id: locked.orderId },
       data: {
         endDatetime: locked.newEnd,
+        expectedReturnAt: locked.newEnd,
         totalPrice: { increment: locked.extraPrice },
       },
     });

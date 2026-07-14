@@ -26,7 +26,8 @@ function safeActorId(actorId) {
 
 /**
  * Release PlayStation + InventoryUnit + InventoryItems for an order.
- * Device release goes through Device Status Manager (RESERVED|RENTED → AVAILABLE).
+ * Cancel path: RESERVED → AVAILABLE (via CANCELLED mapping).
+ * Return path should use syncDeviceToOrderStatus(..., "COMPLETED") so assets go to INSPECTION.
  * Must run inside the same DB transaction as the status change when terminating.
  */
 async function releaseOrderResources(

@@ -22,6 +22,9 @@ const ACTIVE_COURIER_STATUSES = [
   OrderStatus.DELIVERED,
   OrderStatus.ACTIVE,
   OrderStatus.RETURN_REQUESTED,
+  OrderStatus.RETURN_ASSIGNED,
+  OrderStatus.PICKED_UP,
+  OrderStatus.EXPIRED,
 ];
 
 function wrap(err) {
@@ -52,20 +55,60 @@ async function claimPlaystationAndAssign(orderId, courierId, playstationId, extr
       throw err;
     }
 
+    // Reserve a physical InventoryUnit asset when stock exists for this model
+    const inventoryAssetService = require("./inventoryAsset.service");
+    const orderForType = await tx.order.findUnique({
+      where: { id: Number(orderId) },
+      select: { consoleType: true, inventoryUnitId: true },
+    });
+    let reservedUnitId = orderForType?.inventoryUnitId || null;
+    if (orderForType?.consoleType) {
+      const unitCount = await tx.inventoryUnit.count({
+        where: { consoleType: orderForType.consoleType },
+      });
+      if (unitCount > 0 && !reservedUnitId) {
+        const unit = await inventoryAssetService.reserveForOrder(tx, {
+          orderId,
+          consoleType: orderForType.consoleType,
+          actorType: "courier",
+          actorId: courierId,
+        });
+        if (!unit) {
+          await deviceStatusService.syncDeviceToOrderStatus(
+            tx,
+            { id: orderId, playstationId },
+            OrderStatus.CANCELLED,
+            { reason: "NO_INVENTORY_UNIT_ROLLBACK" }
+          );
+          throw new OrderAssignmentError(
+            "NO_INVENTORY",
+            "Bo'sh inventar qurilmasi yo'q (AVAILABLE). Keyinroq urinib ko'ring."
+          );
+        }
+        reservedUnitId = unit.id;
+      }
+    }
+
     try {
       const result = await orderStatusManager.claimOrderForCourier(tx, {
         orderId,
         courierId,
         playstationId,
-        extra,
+        extra: { ...extra, ...(reservedUnitId ? { inventoryUnitId: reservedUnitId } : {}) },
       });
       if (result.count === 0) {
         await deviceStatusService.syncDeviceToOrderStatus(
           tx,
-          { id: orderId, playstationId },
+          { id: orderId, playstationId, inventoryUnitId: reservedUnitId },
           OrderStatus.CANCELLED,
           { reason: "ASSIGN_ROLLBACK" }
         );
+        if (reservedUnitId) {
+          await tx.order.update({
+            where: { id: Number(orderId) },
+            data: { inventoryUnitId: null },
+          });
+        }
         throw new OrderAssignmentError(
           "ALREADY_ACCEPTED",
           "Bu buyurtma boshqa kuryer tomonidan allaqachon qabul qilingan"
@@ -87,14 +130,21 @@ async function claimPlaystationAndAssign(orderId, courierId, playstationId, extr
     } catch (err) {
       if (
         err?.code === "P2002" ||
-        String(err?.message || "").includes("orders_unique_occupying_playstation")
+        String(err?.message || "").includes("orders_unique_occupying_playstation") ||
+        String(err?.message || "").includes("orders_unique_occupying_inventory_unit")
       ) {
         await deviceStatusService.syncDeviceToOrderStatus(
           tx,
-          { id: orderId, playstationId },
+          { id: orderId, playstationId, inventoryUnitId: reservedUnitId },
           OrderStatus.CANCELLED,
           { reason: "UNIQUE_PS_ROLLBACK" }
         );
+        if (reservedUnitId) {
+          await tx.order.update({
+            where: { id: Number(orderId) },
+            data: { inventoryUnitId: null },
+          });
+        }
         throw new OrderAssignmentError(
           "NO_DEVICE",
           "PlayStation allaqachon boshqa buyurtmaga biriktirilgan — boshqa qurilma tanlang"
@@ -416,34 +466,10 @@ async function updateOwnedStatus(orderId, courierId, status) {
   }
 
   if (status === OrderStatus.RETURNED || status === OrderStatus.COMPLETED) {
-    const updatedId = await prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status, ...timestamps },
-      });
-      await orderRepository.createStatusLog(
-        orderId,
-        status,
-        { actorType: "courier", actorId: courierId, note: `Status: ${status}` },
-        tx
-      );
-      const fresh = await tx.order.findUnique({
-        where: { id: orderId },
-        include: orderResourceService.RELEASE_INCLUDE,
-      });
-      await orderResourceService.releaseOrderResources(tx, fresh, {
-        actorType: "courier",
-        actorId: courierId,
-        reason: status,
-      });
-      return orderId;
-    });
-
-    const updated = await orderRepository.findById(updatedId);
-    if (status === OrderStatus.RETURNED) {
-      await orderNotificationService.notifyPlaystationReturned(updated);
-    }
-    return updated;
+    throw new OrderAssignmentError(
+      "FORBIDDEN",
+      "Kuryer buyurtmani yakunlay olmaydi. Avval qaytarish so'rovi va admin tekshiruvi kerak."
+    );
   }
 
   let updated;
@@ -462,15 +488,28 @@ async function updateOwnedStatus(orderId, courierId, status) {
 
   if (status === OrderStatus.DELIVERED && !order.inventoryUnitId) {
     const inventoryService = require("./inventory.service");
-    await inventoryService.assignUnitToOrder(orderId, order.consoleType);
-    const withUnit = await orderRepository.findById(orderId);
-    await prisma.$transaction(async (tx) => {
-      await deviceStatusService.syncDeviceToOrderStatus(tx, withUnit, status, {
-        actorType: "courier",
-        actorId: courierId,
-        reason: "DELIVERED_UNIT",
-      });
+    const inventoryAssetService = require("./inventoryAsset.service");
+    const unit = await inventoryService.assignUnitToOrder(orderId, order.consoleType, {
+      actorType: "courier",
+      actorId: courierId,
     });
+    if (unit) {
+      await prisma.$transaction(async (tx) => {
+        const withUnit = await orderRepository.findById(orderId);
+        // Late assign at delivery: RESERVED → RENTED
+        await inventoryAssetService.markRented(tx, unit.id, {
+          orderId,
+          actorType: "courier",
+          actorId: courierId,
+          reason: "DELIVERED_LATE_ASSIGN",
+        });
+        await deviceStatusService.syncDeviceToOrderStatus(tx, withUnit, status, {
+          actorType: "courier",
+          actorId: courierId,
+          reason: "DELIVERED_UNIT",
+        });
+      });
+    }
   }
 
   const labels = {

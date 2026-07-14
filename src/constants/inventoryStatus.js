@@ -2,7 +2,10 @@ const STATUS_LABELS_UZ = {
   AVAILABLE: "Bo'sh",
   RESERVED: "Band (bron)",
   RENTED: "Ijarada",
+  INSPECTION: "Tekshiruvda",
   MAINTENANCE: "Ta'mirda",
+  DISABLED: "O'chirilgan",
+  LOST: "Yo'qolgan",
   MISSING_PARTS: "Ehtiyot qism yo'q",
   DEFECTIVE: "Nosoz",
 };

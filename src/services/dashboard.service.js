@@ -102,14 +102,44 @@ function buildConsoleStats(grouped) {
   const types = ["PS3", "PS4", "PS5"];
   const map = {};
   for (const t of types) {
-    map[t] = { total: 0, rented: 0, available: 0 };
+    map[t] = {
+      total: 0,
+      available: 0,
+      reserved: 0,
+      rented: 0,
+      inspection: 0,
+      maintenance: 0,
+      disabled: 0,
+      lost: 0,
+      occupancyRate: 0,
+    };
   }
   for (const row of grouped) {
     const t = row.consoleType;
-    if (!map[t]) map[t] = { total: 0, rented: 0, available: 0 };
-    map[t].total += row._count._all;
-    if (row.status === "RENTED" || row.status === "RESERVED") map[t].rented += row._count._all;
-    if (row.status === "AVAILABLE") map[t].available += row._count._all;
+    if (!map[t]) continue;
+    const n = row._count._all;
+    map[t].total += n;
+    if (row.status === "AVAILABLE") map[t].available += n;
+    else if (row.status === "RESERVED") map[t].reserved += n;
+    else if (row.status === "RENTED") map[t].rented += n;
+    else if (row.status === "INSPECTION") map[t].inspection += n;
+    else if (row.status === "MAINTENANCE" || row.status === "MISSING_PARTS") map[t].maintenance += n;
+    else if (row.status === "DISABLED" || row.status === "DEFECTIVE") map[t].disabled += n;
+    else if (row.status === "LOST") map[t].lost += n;
+  }
+  for (const t of types) {
+    const activePool =
+      map[t].available +
+      map[t].reserved +
+      map[t].rented +
+      map[t].inspection +
+      map[t].maintenance;
+    map[t].occupancyRate =
+      activePool > 0
+        ? Math.round(((map[t].reserved + map[t].rented) / activePool) * 10000) / 100
+        : 0;
+    // Legacy field: occupied count (reserved + rented)
+    map[t].occupied = map[t].reserved + map[t].rented;
   }
   return map;
 }

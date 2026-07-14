@@ -17,7 +17,11 @@ enum PlaystationStatus {
   AVAILABLE
   RESERVED
   RENTED
+  INSPECTION
   MAINTENANCE
+  DISABLED
+  LOST
+  /// Legacy ops statuses (kept for existing rows / PlayStation devices)
   MISSING_PARTS
   DEFECTIVE
 }
@@ -89,6 +93,8 @@ enum OrderStatus {
   DELIVERED
   ACTIVE
   RETURN_REQUESTED
+  RETURN_ASSIGNED
+  PICKED_UP
   RETURNED
   COMPLETED
   CANCELLED
@@ -185,12 +191,16 @@ model Playstation {
 
 model InventoryUnit {
   id            Int               @id @default(autoincrement())
+  /// Unique asset code (e.g. PS5-001) — API alias: assetCode
   unitCode      String            @unique
   consoleType   ConsoleType
+  displayName   String?
+  serialNumber  String?           @unique
   status        PlaystationStatus @default(AVAILABLE)
   purchasedAt   DateTime?
   purchasePrice Decimal?          @db.Decimal(10, 2)
   lastServiceAt DateTime?
+  /// Free-form notes (API field: notes)
   adminNote     String?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -198,6 +208,7 @@ model InventoryUnit {
   history       InventoryUnitHistory[]
 
   @@index([consoleType, status])
+  @@index([status])
   @@map("inventory_units")
 }
 
@@ -364,6 +375,12 @@ model Order {
   assignedAt    DateTime?
   deliveryStartedAt DateTime?
   deliveryCompletedAt DateTime?
+  /// Actual rental start (handover time)
+  rentalStartAt       DateTime?
+  /// When rental period ends (handover + tariff duration; updated on extension)
+  expectedReturnAt    DateTime?
+  /// Courier physically collected console from customer
+  pickedUpAt          DateTime?
   assignedByAdmin Boolean    @default(false)
 
   /// Admin/kuryer tasdiqlagan vaqt (confirm window ichida)

@@ -1,13 +1,19 @@
 /**
  * Device (PlayStation / InventoryUnit) status vocabulary & order mapping.
  * Single source of truth for assignability and order↔device sync.
+ *
+ * InventoryUnit (asset) return path: RENTED → INSPECTION (not AVAILABLE).
+ * PlayStation (courier device) on return/cancel: frees to AVAILABLE.
  */
 
 const DeviceStatus = Object.freeze({
   AVAILABLE: "AVAILABLE",
   RESERVED: "RESERVED",
   RENTED: "RENTED",
+  INSPECTION: "INSPECTION",
   MAINTENANCE: "MAINTENANCE",
+  DISABLED: "DISABLED",
+  LOST: "LOST",
   MISSING_PARTS: "MISSING_PARTS",
   DEFECTIVE: "DEFECTIVE",
 });
@@ -25,14 +31,18 @@ const OCCUPYING_DEVICE_STATUSES = Object.freeze([
 const BLOCKED_DEVICE_STATUSES = Object.freeze([
   DeviceStatus.RESERVED,
   DeviceStatus.RENTED,
+  DeviceStatus.INSPECTION,
   DeviceStatus.MAINTENANCE,
+  DeviceStatus.DISABLED,
+  DeviceStatus.LOST,
   DeviceStatus.MISSING_PARTS,
   DeviceStatus.DEFECTIVE,
 ]);
 
 /**
- * Target PlayStation status for a given order status.
- * null = no device transition required (e.g. PENDING without PS).
+ * Target status for a given order status.
+ * InventoryUnit uses this map as-is (RETURNED/COMPLETED → INSPECTION).
+ * PlayStation maps INSPECTION → AVAILABLE via expectedPlaystationStatus().
  * EXPIRED keeps RENTED — rental end alone must NOT free the device.
  */
 const ORDER_TO_DEVICE_STATUS = Object.freeze({
@@ -45,9 +55,11 @@ const ORDER_TO_DEVICE_STATUS = Object.freeze({
   DELIVERED: DeviceStatus.RENTED,
   ACTIVE: DeviceStatus.RENTED,
   RETURN_REQUESTED: DeviceStatus.RENTED,
+  RETURN_ASSIGNED: DeviceStatus.RENTED,
+  PICKED_UP: DeviceStatus.RENTED,
   EXPIRED: DeviceStatus.RENTED,
-  RETURNED: DeviceStatus.AVAILABLE,
-  COMPLETED: DeviceStatus.AVAILABLE,
+  RETURNED: DeviceStatus.INSPECTION,
+  COMPLETED: DeviceStatus.INSPECTION,
   CANCELLED: DeviceStatus.AVAILABLE,
   REJECTED: DeviceStatus.AVAILABLE,
 });
@@ -61,6 +73,8 @@ const DEVICE_OCCUPYING_ORDER_STATUSES = Object.freeze([
   "DELIVERED",
   "ACTIVE",
   "RETURN_REQUESTED",
+  "RETURN_ASSIGNED",
+  "PICKED_UP",
   "EXPIRED",
 ]);
 
@@ -68,12 +82,24 @@ function expectedDeviceStatus(orderStatus) {
   return ORDER_TO_DEVICE_STATUS[orderStatus] ?? null;
 }
 
+/** Courier PlayStation frees on return; assets go to INSPECTION instead. */
+function expectedPlaystationStatus(orderStatus) {
+  const target = expectedDeviceStatus(orderStatus);
+  if (target === DeviceStatus.INSPECTION) return DeviceStatus.AVAILABLE;
+  return target;
+}
+
+function expectedInventoryUnitStatus(orderStatus) {
+  return expectedDeviceStatus(orderStatus);
+}
+
 function isAssignable(status) {
   return status === DeviceStatus.AVAILABLE;
 }
 
 function isReleaseTarget(orderStatus) {
-  return expectedDeviceStatus(orderStatus) === DeviceStatus.AVAILABLE;
+  const t = expectedDeviceStatus(orderStatus);
+  return t === DeviceStatus.AVAILABLE || t === DeviceStatus.INSPECTION;
 }
 
 module.exports = {
@@ -84,6 +110,8 @@ module.exports = {
   ORDER_TO_DEVICE_STATUS,
   DEVICE_OCCUPYING_ORDER_STATUSES,
   expectedDeviceStatus,
+  expectedPlaystationStatus,
+  expectedInventoryUnitStatus,
   isAssignable,
   isReleaseTarget,
 };

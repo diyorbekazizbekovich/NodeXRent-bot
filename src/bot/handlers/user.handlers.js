@@ -6,11 +6,12 @@ const orderScene = require("../scenes/orderScene");
 const sessionStore = require("../sessionStore");
 const logger = require("../../utils/logger");
 const rentalExtensionService = require("../../services/rentalExtension.service");
+const rentalReturnService = require("../../services/rentalReturn.service");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const userOrderHistoryService = require("../../services/userOrderHistory.service");
-const { ACTIVE_RENTAL_STATUSES, LOCATION_UPDATABLE_STATUSES } = require("../../constants/orderStatus");
+const { ACTIVE_RENTAL_STATUSES, LOCATION_UPDATABLE_STATUSES, OrderStatus } = require("../../constants/orderStatus");
 const { t, resolveLang, languageKeyboard, matchMenuAction, normalizeLang } = require("../../i18n");
-const { formatDatetime } = require("../../utils/dateHelper");
+const { formatDatetime, formatRemainingDuration } = require("../../utils/dateHelper");
 const {
   registerUserSupportHandlers,
   handleUserSupportMessage,
@@ -30,6 +31,7 @@ const USER_CALLBACK_PREFIXES = [
   "time:",
   "promo:",
   "extend:",
+  "return:",
   "order:",
   "rate:",
 ];
@@ -238,12 +240,36 @@ function register(bot) {
             text: t("extend.pickItem", L, {
               id: o.id,
               console: o.consoleType,
-              end: formatDatetime(o.endDatetime),
+              end: formatDatetime(o.expectedReturnAt || o.endDatetime),
             }),
             callback_data: `extend:pick:${o.id}`,
           },
         ]);
         await bot.sendMessage(chatId, t("extend.pick", L), {
+          reply_markup: { inline_keyboard: rows },
+        });
+        return;
+      }
+      case "returnReady": {
+        const orders = await orderService.listUserOrders(user.id, { take: 20 });
+        const candidates = orders.filter((o) =>
+          [OrderStatus.ACTIVE, OrderStatus.DELIVERED, OrderStatus.EXPIRED].includes(o.status)
+        );
+        if (!candidates.length) {
+          await bot.sendMessage(chatId, t("returnReady.none", L));
+          return;
+        }
+        const rows = candidates.map((o) => [
+          {
+            text: t("returnReady.pickItem", L, {
+              id: o.id,
+              console: o.consoleType,
+              status: o.status,
+            }),
+            callback_data: `return:req:${o.id}`,
+          },
+        ]);
+        await bot.sendMessage(chatId, t("returnReady.pick", L), {
           reply_markup: { inline_keyboard: rows },
         });
         return;
@@ -391,6 +417,34 @@ function register(bot) {
             },
           }
         );
+      } else if (data.startsWith("return:req:")) {
+        const orderId = Number(data.split(":")[2]);
+        const user = await userService.getUserByTelegramId(telegramId);
+        const L = resolveLang(user?.language);
+        try {
+          await rentalReturnService.requestReturn(orderId, {
+            actorType: "user",
+            actorId: user.id,
+            userId: user.id,
+          });
+          await bot.sendMessage(chatId, t("returnReady.ok", L, { id: orderId }));
+          try {
+            await bot.editMessageReplyMarkup(
+              { inline_keyboard: [] },
+              { chat_id: chatId, message_id: query.message.message_id }
+            );
+          } catch (_) {}
+        } catch (err) {
+          if (err.code === "RENTAL_NOT_ENDED") {
+            const order = await orderService.getOrderById(orderId);
+            const remaining = formatRemainingDuration(
+              rentalReturnService.getExpectedReturnAt(order || {})
+            );
+            await bot.sendMessage(chatId, t("returnReady.tooEarly", L, { remaining }));
+          } else {
+            await bot.sendMessage(chatId, t("returnReady.fail", L, { error: err.message }));
+          }
+        }
       } else if (data.startsWith("extend:req:")) {
         const [, , orderIdRaw, hoursRaw] = data.split(":");
         const user = await userService.getUserByTelegramId(telegramId);

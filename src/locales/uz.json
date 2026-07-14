@@ -19,6 +19,7 @@
     "order": "🎮 Buyurtma berish",
     "myOrders": "📋 Buyurtmalarim",
     "extend": "⏳ Ijara uzaytirish",
+    "returnReady": "↩️ Qaytarishga tayyorman",
     "changeAddress": "📍 Manzilni o'zgartirish",
     "help": "ℹ️ Yordam",
     "language": "🌐 Til / Язык",
@@ -111,6 +112,14 @@
     "day2": "📅 2 kun",
     "day3": "📅 3 kun",
     "requested": "✅ Uzaytirish so'rovi yuborildi.\n\nQo'shimcha: {{duration}}\nNarx: {{price}} so'm\nYangi tugash (tasdiqlansa): {{newEnd}}\n\nAdmin javobini kuting.",
+    "fail": "❗️ {{error}}"
+  },
+  "returnReady": {
+    "none": "Qaytarish uchun buyurtma topilmadi.\n\nIjara muddati tugagach shu yerda so'rov yuborishingiz mumkin.",
+    "pick": "Qaysi buyurtmani qaytarmoqchisiz?",
+    "pickItem": "#{{id}} {{console}} — {{status}}",
+    "ok": "✅ Qaytarish so'rovi yuborildi (#{{id}}).\nKuryer tez orada keladi.",
+    "tooEarly": "❌ Ijara muddati hali tugamagan.\nQolgan vaqt: {{remaining}}",
     "fail": "❗️ {{error}}"
   },
   "myOrders": {

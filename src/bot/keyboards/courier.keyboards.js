@@ -98,9 +98,49 @@ function locationUpdateKeyboard(orderId, lat, lon) {
 }
 
 function deliveredKeyboard(orderId) {
+  // Legacy name — now used only for return-eligible statuses
+  return returnPickupKeyboard(orderId);
+}
+
+/** ACTIVE rental: countdown only — no return button */
+function activeRentalKeyboard(orderId, remainingText) {
   return {
     reply_markup: {
-      inline_keyboard: [[{ text: "↩️ Qaytarildi", callback_data: `courier:returned:${orderId}` }]],
+      inline_keyboard: [
+        [
+          {
+            text: `⏳ Ijara tugashiga: ${remainingText || "—"}`,
+            callback_data: `courier:rentalInfo:${orderId}`,
+          },
+        ],
+      ],
+    },
+  };
+}
+
+/** RETURN_REQUESTED / RETURN_ASSIGNED — courier may collect */
+function returnPickupKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "↩️ Qaytarib olish", callback_data: `courier:returned:${orderId}` }],
+      ],
+    },
+  };
+}
+
+/** After pickup — waiting for admin */
+function pickedUpKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "🔍 Admin tekshiruvi kutilmoqda",
+            callback_data: `courier:rentalInfo:${orderId}`,
+          },
+        ],
+      ],
     },
   };
 }
@@ -162,6 +202,9 @@ module.exports = {
   onTheWayKeyboard,
   arrivedKeyboard,
   deliveredKeyboard,
+  activeRentalKeyboard,
+  returnPickupKeyboard,
+  pickedUpKeyboard,
   locationUpdateKeyboard,
   handoverCollateralKeyboard,
   handoverNoneConfirmKeyboard,

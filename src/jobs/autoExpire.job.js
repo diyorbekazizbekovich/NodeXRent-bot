@@ -17,8 +17,11 @@ function startAutoExpireJob() {
         const now = new Date();
         const overdue = await prisma.order.findMany({
           where: {
-            status: { in: ["DELIVERED", "ACTIVE", "RETURN_REQUESTED"] },
-            endDatetime: { lt: now },
+            status: { in: ["DELIVERED", "ACTIVE"] },
+            OR: [
+              { expectedReturnAt: { lt: now } },
+              { AND: [{ expectedReturnAt: null }, { endDatetime: { lt: now } }] },
+            ],
           },
           include: { user: true, courier: true, playstation: true },
         });

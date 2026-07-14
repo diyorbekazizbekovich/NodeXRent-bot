@@ -25,7 +25,7 @@ function newOrderKeyboard(orderId, { confirmAllowed = false, highPriority = fals
   return { reply_markup: { inline_keyboard: rows } };
 }
 
-/** @deprecated Manual assign removed from primary workflow */
+/** @deprecated Manual assign removed from primary delivery workflow */
 function courierPickKeyboard(orderId, couriers) {
   return {
     reply_markup: {
@@ -39,4 +39,38 @@ function courierPickKeyboard(orderId, couriers) {
   };
 }
 
-module.exports = { newOrderKeyboard, courierPickKeyboard };
+/** Return pickup courier assignment */
+function returnCourierPickKeyboard(orderId, couriers) {
+  return {
+    reply_markup: {
+      inline_keyboard: couriers.map((c) => [
+        {
+          text: `↩️ ${c.fullName || c.telegramId}`,
+          callback_data: `admin:order:returnAssignTo:${orderId}:${c.id}`,
+        },
+      ]),
+    },
+  };
+}
+
+function returnActionsKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "↩️ Qaytarish so'rovi (force)", callback_data: `admin:order:returnReq:${orderId}` }],
+        [{ text: "🚚 Qaytarish kuryeri", callback_data: `admin:order:returnAssign:${orderId}` }],
+        [
+          { text: "✅ Tekshiruv OK", callback_data: `admin:order:inspectOk:${orderId}` },
+          { text: "🛠 Nosoz", callback_data: `admin:order:inspectBad:${orderId}` },
+        ],
+      ],
+    },
+  };
+}
+
+module.exports = {
+  newOrderKeyboard,
+  courierPickKeyboard,
+  returnCourierPickKeyboard,
+  returnActionsKeyboard,
+};

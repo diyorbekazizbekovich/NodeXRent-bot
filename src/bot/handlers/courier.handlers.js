@@ -4,6 +4,7 @@ const orderService = require("../../services/order.service");
 const orderAssignmentService = require("../../services/orderAssignment.service");
 const orderNotificationService = require("../../services/orderNotification.service");
 const deliveryHandoverService = require("../../services/deliveryHandover.service");
+const rentalReturnService = require("../../services/rentalReturn.service");
 const courierKeyboards = require("../keyboards/courier.keyboards");
 const sessionStore = require("../sessionStore");
 const logger = require("../../utils/logger");
@@ -13,6 +14,8 @@ const handoverWizard = require("../scenes/handoverWizard");
 const returnWizard = require("../scenes/returnWizard");
 const { addCallbackHandler } = require("../events/callbackRouter");
 const { escapeHtml } = require("../../utils/telegramFormat");
+const { COURIER_RETURN_ALLOWED_STATUSES, label: statusLabel } = require("../../constants/orderStatus");
+const { formatRemainingDuration } = require("../../utils/dateHelper");
 
 const CONSOLE_TYPES = ["PS3", "PS4", "PS5"];
 
@@ -218,8 +221,37 @@ function register(bot) {
         let kb = courierKeyboards.assignedOrderKeyboard(o.id);
         if (o.status === "ON_THE_WAY") kb = courierKeyboards.onTheWayKeyboard(o.id);
         else if (o.status === "ARRIVED") kb = courierKeyboards.arrivedKeyboard(o.id);
-        else if (["DELIVERED", "ACTIVE"].includes(o.status)) kb = courierKeyboards.deliveredKeyboard(o.id);
-        await bot.sendMessage(chatId, `#${o.id} — ${o.consoleType} — ${o.status}`, kb);
+        else if (["DELIVERED", "ACTIVE"].includes(o.status)) {
+          const end = rentalReturnService.getExpectedReturnAt(o);
+          const remaining = formatRemainingDuration(end);
+          kb = courierKeyboards.activeRentalKeyboard(o.id, remaining);
+        } else if (COURIER_RETURN_ALLOWED_STATUSES.includes(o.status)) {
+          kb = courierKeyboards.returnPickupKeyboard(o.id);
+        } else if (o.status === "PICKED_UP") {
+          kb = courierKeyboards.pickedUpKeyboard(o.id);
+        } else if (o.status === "EXPIRED") {
+          kb = {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: "⏳ Qaytarish so'rovi kutilmoqda",
+                    callback_data: `courier:rentalInfo:${o.id}`,
+                  },
+                ],
+              ],
+            },
+          };
+        }
+        const endHint =
+          ["DELIVERED", "ACTIVE"].includes(o.status) && rentalReturnService.getExpectedReturnAt(o)
+            ? `\n⏳ ${formatRemainingDuration(rentalReturnService.getExpectedReturnAt(o))}`
+            : "";
+        await bot.sendMessage(
+          chatId,
+          `#${o.id} — ${o.consoleType} — ${statusLabel(o.status)}${endHint}`,
+          { parse_mode: "HTML", ...kb }
+        );
       }
       return;
     }
@@ -344,10 +376,12 @@ function register(bot) {
       } else if (action === "arrived") {
         const current = await orderService.getOrderById(orderId);
         if (current?.paymentReceived || ["DELIVERED", "ACTIVE"].includes(current?.status)) {
+          const end = rentalReturnService.getExpectedReturnAt(current);
+          const remaining = formatRemainingDuration(end);
           await bot.sendMessage(
             chatId,
-            `📦 Buyurtma #${orderId} allaqachon faol ijara holatida.`,
-            courierKeyboards.deliveredKeyboard(orderId)
+            `📦 Buyurtma #${orderId} — faol ijara.\n⏳ Ijara tugashiga: ${remaining}`,
+            courierKeyboards.activeRentalKeyboard(orderId, remaining)
           );
         } else {
           if (current?.status !== "ARRIVED") {
@@ -358,21 +392,60 @@ function register(bot) {
       } else if (action === "delivered") {
         const current = await orderService.getOrderById(orderId);
         if (current?.paymentReceived || ["DELIVERED", "ACTIVE"].includes(current?.status)) {
+          const end = rentalReturnService.getExpectedReturnAt(current);
+          const remaining = formatRemainingDuration(end);
           await bot.sendMessage(
             chatId,
-            `📦 Buyurtma #${orderId} allaqachon faol ijara.`,
-            courierKeyboards.deliveredKeyboard(orderId)
+            `📦 Buyurtma #${orderId} allaqachon faol ijara.\n⏳ Ijara tugashiga: ${remaining}`,
+            courierKeyboards.activeRentalKeyboard(orderId, remaining)
           );
         } else {
           await handoverWizard.startHandoverWizard(bot, chatId, orderId);
         }
+      } else if (action === "rentalInfo") {
+        const current = await orderService.getOrderById(orderId);
+        if (!current) {
+          await bot.sendMessage(chatId, "Buyurtma topilmadi.");
+        } else {
+          const end = rentalReturnService.getExpectedReturnAt(current);
+          const remaining = end ? formatRemainingDuration(end) : "—";
+          const ended = rentalReturnService.isRentalPeriodEnded(current);
+          await bot.sendMessage(
+            chatId,
+            `📦 Buyurtma #${orderId}\n` +
+              `Holat: ${statusLabel(current.status)}\n` +
+              `Ijara tugashi: ${remaining}\n` +
+              (ended
+                ? "Mijoz/admin qaytarish so'rovini yaratishi kerak."
+                : "Ijara hali davom etmoqda — qaytarib olib bo'lmaydi.")
+          );
+        }
       } else if (action === "returned") {
-        const started = await returnWizard.startReturnWizard(bot, chatId, orderId);
-        if (started === false) {
-          // Legacy orders without inventory links
-          await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "RETURNED");
-          await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "COMPLETED");
-          await bot.sendMessage(chatId, `✅ Buyurtma #${orderId} yakunlandi (legacy).`);
+        const current = await orderService.getOrderById(orderId);
+        if (!current) {
+          await bot.sendMessage(chatId, "Buyurtma topilmadi.");
+        } else if (["DELIVERED", "ACTIVE"].includes(current.status)) {
+          const remaining = formatRemainingDuration(rentalReturnService.getExpectedReturnAt(current));
+          await bot.sendMessage(
+            chatId,
+            `❌ Ijara muddati hali tugamagan.\n⏳ Qolgan vaqt: ${remaining}`,
+            courierKeyboards.activeRentalKeyboard(orderId, remaining)
+          );
+        } else if (!COURIER_RETURN_ALLOWED_STATUSES.includes(current.status)) {
+          await bot.sendMessage(
+            chatId,
+            `Bu holatda qaytarib bo'lmaydi: ${statusLabel(current.status)}`
+          );
+        } else if (current.courierId !== courier.id) {
+          await bot.sendMessage(chatId, "Bu qaytarish sizga biriktirilmagan.");
+        } else {
+          const started = await returnWizard.startReturnWizard(bot, chatId, orderId);
+          if (started === false) {
+            await bot.sendMessage(
+              chatId,
+              `❗️ Buyurtma #${orderId} inventarsiz. Admin orqali yakunlang.`
+            );
+          }
         }
       } else if (action === "cancel") {
         await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "CANCELLED");

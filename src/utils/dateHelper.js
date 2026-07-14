@@ -36,6 +36,27 @@ function addHours(date, hours) {
   return new Date(new Date(date).getTime() + hours * 60 * 60 * 1000);
 }
 
+/**
+ * Human remaining time until `target` (Tashkent-friendly wording).
+ * e.g. "1 kun 8 soat", "12 soat 15 daqiqa", "tugagan"
+ */
+function formatRemainingDuration(target, now = new Date()) {
+  const ms = new Date(target).getTime() - new Date(now).getTime();
+  if (!Number.isFinite(ms)) return "—";
+  if (ms <= 0) return "tugagan";
+
+  const totalMinutes = Math.floor(ms / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts = [];
+  if (days > 0) parts.push(`${days} kun`);
+  if (hours > 0) parts.push(`${hours} soat`);
+  if (days === 0 && (minutes > 0 || parts.length === 0)) parts.push(`${minutes} daqiqa`);
+  return parts.join(" ");
+}
+
 function formatDatetime(date) {
   const p = zonedParts(date);
   const pad = (n) => String(n).padStart(2, "0");
@@ -86,6 +107,7 @@ module.exports = {
   zonedParts,
   zonedDateTime,
   addHours,
+  formatRemainingDuration,
   formatDatetime,
   formatDate,
   quickDateOptions,

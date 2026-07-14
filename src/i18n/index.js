@@ -78,6 +78,7 @@ function matchMenuAction(text) {
       order: t("menu.order", code),
       myOrders: t("menu.myOrders", code),
       extend: t("menu.extend", code),
+      returnReady: t("menu.returnReady", code),
       changeAddress: t("menu.changeAddress", code),
       help: t("menu.help", code),
       language: t("menu.language", code),
@@ -97,6 +98,7 @@ function allKnownUserMenuTexts() {
     set.add(t("menu.order", code));
     set.add(t("menu.myOrders", code));
     set.add(t("menu.extend", code));
+    set.add(t("menu.returnReady", code));
     set.add(t("menu.changeAddress", code));
     set.add(t("menu.help", code));
     set.add(t("menu.language", code));

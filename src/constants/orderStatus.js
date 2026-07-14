@@ -12,6 +12,8 @@ const OrderStatus = {
   ACTIVE: "ACTIVE",
   ACTIVE_RENTAL: "ACTIVE",
   RETURN_REQUESTED: "RETURN_REQUESTED",
+  RETURN_ASSIGNED: "RETURN_ASSIGNED",
+  PICKED_UP: "PICKED_UP",
   RETURNED: "RETURNED",
   COMPLETED: "COMPLETED",
   CANCELLED: "CANCELLED",
@@ -29,6 +31,8 @@ const STATUS_LABELS_UZ = {
   DELIVERED: "Yetkazib berilgan",
   ACTIVE: "Faol ijara",
   RETURN_REQUESTED: "Qaytarish so'raldi",
+  RETURN_ASSIGNED: "Qaytarish uchun kuryer biriktirildi",
+  PICKED_UP: "Kuryer olib oldi — admin tekshiruvi",
   RETURNED: "PlayStation qaytarib olindi",
   COMPLETED: "Yakunlandi",
   CANCELLED: "Bekor qilingan",
@@ -51,16 +55,24 @@ const ADMIN_FILTER_GROUPS = [
   {
     key: "RENTING",
     label: "Ijarada",
-    statuses: ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"],
+    statuses: ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED", "RETURN_ASSIGNED", "EXPIRED"],
   },
-  { key: "RETURNED", label: "PlayStation qaytarib olindi", statuses: ["RETURNED", "COMPLETED"] },
+  {
+    key: "RETURN",
+    label: "Qaytarish / tekshiruv",
+    statuses: ["RETURN_REQUESTED", "RETURN_ASSIGNED", "PICKED_UP"],
+  },
+  { key: "RETURNED", label: "Yakunlangan", statuses: ["RETURNED", "COMPLETED", "PICKED_UP"] },
   { key: "CANCELLED", label: "Bekor qilingan", statuses: ["CANCELLED", "EXPIRED", "REJECTED"] },
 ];
 
-const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED", "ACTIVE"];
+const REVENUE_STATUSES = ["COMPLETED", "RETURNED", "DELIVERED", "ACTIVE", "PICKED_UP"];
 
-/** Faol ijara: qurilma mijozda */
-const ACTIVE_RENTAL_STATUSES = ["ARRIVED", "DELIVERED", "ACTIVE", "RETURN_REQUESTED"];
+/** Faol ijara: qurilma mijozda (uzaytirish uchun) */
+const ACTIVE_RENTAL_STATUSES = ["ARRIVED", "DELIVERED", "ACTIVE"];
+
+/** Courier may show pickup/return wizard only in these statuses */
+const COURIER_RETURN_ALLOWED_STATUSES = ["RETURN_REQUESTED", "RETURN_ASSIGNED"];
 
 /**
  * Foydalanuvchida yangi buyurtma yaratishni bloklovchi ochiq statuslar.
@@ -75,6 +87,9 @@ const USER_OPEN_ORDER_STATUSES = [
   OrderStatus.DELIVERED,
   OrderStatus.ACTIVE,
   OrderStatus.RETURN_REQUESTED,
+  OrderStatus.RETURN_ASSIGNED,
+  OrderStatus.PICKED_UP,
+  OrderStatus.EXPIRED,
 ];
 
 /** Qurilma/inventar bo'shatilishi kerak bo'lgan yakuniy statuslar */
@@ -107,6 +122,8 @@ const TIMELINE_LABELS = {
   DELIVERED: "Yetkazildi",
   ACTIVE: "Faol ijara",
   RETURN_REQUESTED: "Qaytarish so'raldi",
+  RETURN_ASSIGNED: "Qaytarish uchun kuryer biriktirildi",
+  PICKED_UP: "Kuryer olib oldi",
   RETURNED: "PlayStation qaytarib olindi",
   COMPLETED: "Yakunlandi",
   REJECTED: "Rad etildi",
@@ -128,6 +145,7 @@ module.exports = {
   ADMIN_FILTER_GROUPS,
   REVENUE_STATUSES,
   ACTIVE_RENTAL_STATUSES,
+  COURIER_RETURN_ALLOWED_STATUSES,
   USER_OPEN_ORDER_STATUSES,
   RESOURCE_RELEASE_STATUSES,
   LOCATION_UPDATABLE_STATUSES,

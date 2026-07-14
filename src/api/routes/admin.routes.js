@@ -3,7 +3,9 @@ const router = express.Router();
 const reportService = require("../../services/report.service");
 const { requireRole } = require("../../middleware/rbac");
 const { registerDashboardRoutes } = require("./admin.dashboard.routes");
+const { registerInventoryAssetRoutes } = require("./admin.inventory.routes");
 
+registerInventoryAssetRoutes(router);
 registerDashboardRoutes(router);
 
 router.get("/stats", requireRole("admin"), async (req, res) => {
