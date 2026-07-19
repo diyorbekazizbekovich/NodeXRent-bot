@@ -56,6 +56,7 @@ const { registerAdminBackupHandlers, backupKeyboard } = require("./admin.backup.
 const { registerAdminAuditHandlers } = require("./admin.audit.handlers");
 const adminInventoryItem = require("./admin.inventoryItem.handlers");
 const adminInventory = require("./admin.inventory.handlers");
+const { ADMIN_MENU_TEXTS, resetConversation } = require("../adminConversation");
 const { label, filterGroup } = require("../../constants/orderStatus");
 const { buildOrderTimeline } = require("../../utils/orderTimeline");
 const { escapeHtml } = require("../../utils/telegramFormat");
@@ -68,34 +69,13 @@ function isAdminMainCallback(data) {
     data.startsWith("admin:settings:") ||
     data.startsWith("admin:inv:") ||
     data.startsWith("admin:invitem:") ||
+    data.startsWith("admin:conv:") ||
     data.startsWith("admin:orders:") ||
     data.startsWith("admin:order:timeline:") ||
     data.startsWith("admin:ext:") ||
     data.startsWith("admin:dashboard:")
   );
 }
-
-/** Reply-keyboard menyu — faol compose/sessionni yutib yubormasligi uchun */
-const ADMIN_MENU_TEXTS = new Set([
-  "📊 Dashboard",
-  "📅 Bugun",
-  "👥 CRM",
-  "📦 Buyurtmalar",
-  "🎮 Inventar",
-  "🎮 PlayStationlar",
-  "📈 Analytics",
-  "🚚 Kuryerlar",
-  "💰 Narxlar",
-  "💾 Backup",
-  "📋 Loglar",
-  "🏷️ Promo",
-  "🏷️ Promo-kodlar",
-  "📢 Reklama",
-  "⚙️ Sozlamalar",
-  "📊 Statistika",
-  "👥 Foydalanuvchilar",
-  "🗑 Bazani tozalash",
-]);
 
 async function isAdmin(telegramId) {
   if (env.ADMIN_TELEGRAM_IDS.includes(Number(telegramId))) return true;
@@ -146,17 +126,19 @@ function register(bot) {
     const telegramId = msg.from.id;
     if (!(await isAdmin(telegramId))) return;
 
+    // CRITICAL: menu / cancel must clear wizard BEFORE inventory text handlers.
+    // Otherwise a stuck invitem:note / inv:addSerial session swallows every message
+    // (including Dashboard) and re-runs create validation forever.
+    const text = msg.text ? msg.text.trim() : "";
+    if (text && ADMIN_MENU_TEXTS.has(text)) {
+      resetConversation(chatId);
+    }
+
+    // Inventory wizards — only when not a menu transition (session already cleared)
     if (await adminInventoryItem.handleText(bot, msg)) return;
     if (await adminInventory.handleText(bot, msg, { telegramId })) return;
 
     let session = sessionStore.getSession(chatId);
-
-    // Menyu tugmasi bosilsa — compose/sessionni tozalab, menyuga o'tkazamiz
-    // (aks holda support/CRM/ads session Analytics va boshqa tugmalarni yutib yuboradi)
-    if (msg.text && ADMIN_MENU_TEXTS.has(msg.text.trim()) && session.step) {
-      sessionStore.clearSession(chatId);
-      session = sessionStore.getSession(chatId);
-    }
 
     // Support chat compose — matn + media (ads dan oldin)
     if (await handleAdminSupportMessage(bot, chatId, msg, session)) return;
@@ -222,7 +204,7 @@ function register(bot) {
 
     if (session.step === "admin:inv:set") {
       // Legacy path — redirect to unit-based inventory
-      sessionStore.clearSession(chatId);
+      resetConversation(chatId);
       await bot.sendMessage(
         chatId,
         "ℹ️ Sonni qo'lda o'zgartirish o'chirilgan.\nModelni tanlab «➕ Qurilma qo'shish» dan foydalaning."
@@ -413,6 +395,7 @@ function register(bot) {
       }
       case "🎮 Inventar":
       case "🎮 PlayStationlar": {
+        resetConversation(chatId);
         await adminInventory.sendOverview(bot, chatId);
         await bot.sendMessage(
           chatId,
@@ -501,6 +484,13 @@ function register(bot) {
 
     if (await adminInventoryItem.handleCallback(bot, query, data)) return true;
     if (await adminInventory.handleCallback(bot, query, data, { telegramId })) return true;
+
+    if (data === "admin:conv:cancel") {
+      resetConversation(chatId);
+      await bot.sendMessage(chatId, "❌ Amal bekor qilindi.");
+      await adminInventory.sendOverview(bot, chatId);
+      return true;
+    }
 
     if (data === "admin:promo:new") {
       sessionStore.setStep(chatId, "admin:promo:code");

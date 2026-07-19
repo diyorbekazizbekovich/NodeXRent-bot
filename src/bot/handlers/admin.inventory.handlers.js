@@ -7,10 +7,21 @@ const inventoryAssetService = require("../../services/inventoryAsset.service");
 const { InventoryAssetError } = require("../../services/inventoryAsset.service");
 const { label: statusLabel } = require("../../constants/inventoryStatus");
 const sessionStore = require("../sessionStore");
+const {
+  cancelKeyboard,
+  shouldAbortWizard,
+  resetConversation,
+} = require("../adminConversation");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const prisma = require("../../config/prisma");
 
 const CONSOLE_TYPES = ["PS3", "PS4", "PS5"];
+const PREFIX = "admin:inv:";
+
+const STEPS = Object.freeze({
+  ADD_SERIAL: "admin:inv:addSerial",
+  EDIT_NOTE: "admin:inv:editNote",
+});
 
 const STATUS_ICON = {
   AVAILABLE: "✅",
@@ -134,7 +145,7 @@ async function suggestNextCode(consoleType) {
 }
 
 async function handleCallback(bot, query, data, { telegramId } = {}) {
-  if (!data?.startsWith("admin:inv:")) return false;
+  if (!data?.startsWith(PREFIX)) return false;
   if (data.startsWith("admin:invitem:")) return false;
 
   const chatId = query.message.chat.id;
@@ -144,6 +155,12 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
   const action = parts[2];
 
   try {
+    // Any inventory navigation cancels pending text wizards (add/edit)
+    if (["refresh", "back", "model", "list", "editmenu", "unit", "add"].includes(action)) {
+      // add starts a new wizard below; others clear
+      if (action !== "add") resetConversation(chatId);
+    }
+
     if (action === "refresh" || action === "back") {
       await sendOverview(bot, chatId);
       return true;
@@ -165,16 +182,16 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
         await bot.sendMessage(chatId, "Noto'g'ri model.");
         return true;
       }
-      sessionStore.setStep(chatId, "admin:inv:addSerial");
-      sessionStore.updateData(chatId, { _invAddModel: consoleType });
+      sessionStore.beginAction(chatId, STEPS.ADD_SERIAL, { _invAddModel: consoleType });
       const nextHint = await suggestNextCode(consoleType);
       await bot.sendMessage(
         chatId,
         `➕ <b>${consoleType}</b> qurilma qo'shish\n\n` +
           `Seriya / asset kodini kiriting.\n` +
           `Masalan: <code>${nextHint}</code>\n\n` +
-          `/skip — avtomatik kod beriladi.`,
-        { parse_mode: "HTML" }
+          `/skip — avtomatik kod\n` +
+          `/cancel — bekor qilish`,
+        { parse_mode: "HTML", ...cancelKeyboard() }
       );
       return true;
     }
@@ -301,12 +318,14 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
         await bot.sendMessage(chatId, "Qurilma topilmadi.");
         return true;
       }
-      sessionStore.setStep(chatId, "admin:inv:editNote");
-      sessionStore.updateData(chatId, { _invEditId: unitId, _invEditModel: unit.consoleType });
+      sessionStore.beginAction(chatId, STEPS.EDIT_NOTE, {
+        _invEditId: unitId,
+        _invEditModel: unit.consoleType,
+      });
       await bot.sendMessage(
         chatId,
-        `✏️ <b>${unit.unitCode}</b>\n\nYangi izoh kiriting (yoki /skip):\nHozirgi: ${unit.adminNote || "—"}`,
-        { parse_mode: "HTML" }
+        `✏️ <b>${unit.unitCode}</b>\n\nYangi izoh kiriting (yoki /skip):\nHozirgi: ${unit.adminNote || "—"}\n\n/cancel — bekor`,
+        { parse_mode: "HTML", ...cancelKeyboard() }
       );
       return true;
     }
@@ -361,23 +380,35 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
 
 async function handleText(bot, msg, { telegramId } = {}) {
   const chatId = msg.chat.id;
+  const text = (msg.text || "").trim();
+  if (!sessionStore.hasActiveStep(chatId, PREFIX)) return false;
+  // Do not steal invitem sessions (different prefix — already filtered)
+  if (sessionStore.hasActiveStep(chatId, "admin:invitem:")) return false;
+
+  if (shouldAbortWizard(text)) {
+    resetConversation(chatId);
+    if (/^\/cancel\b/i.test(text) || text === "❌ Bekor qilish" || text === "❌ Bekor") {
+      await bot.sendMessage(chatId, "❌ Amal bekor qilindi.");
+      await sendOverview(bot, chatId);
+      return true;
+    }
+    return false; // menu → admin router
+  }
+
   const session = sessionStore.getSession(chatId);
   const step = session.step || "";
-  if (!step.startsWith("admin:inv:")) return false;
-  if (step.startsWith("admin:invitem:")) return false;
-
-  const text = (msg.text || "").trim();
   const adminRecord = await prisma.admin.findUnique({
     where: { telegramId: BigInt(telegramId) },
   });
   const adminContext = { adminId: adminRecord?.id, telegramId };
 
   try {
-    if (step === "admin:inv:addSerial") {
+    if (step === STEPS.ADD_SERIAL) {
       const consoleType = session.data._invAddModel;
       if (!CONSOLE_TYPES.includes(consoleType)) {
-        sessionStore.clearSession(chatId);
-        await bot.sendMessage(chatId, "Sessiya xato.");
+        resetConversation(chatId);
+        await bot.sendMessage(chatId, "Sessiya xato — qaytadan boshlang.");
+        await sendOverview(bot, chatId);
         return true;
       }
 
@@ -401,7 +432,7 @@ async function handleText(bot, msg, { telegramId } = {}) {
         adminContext
       );
 
-      sessionStore.clearSession(chatId);
+      resetConversation(chatId);
       await bot.sendMessage(chatId, `✅ Qurilma qo'shildi: <b>${created.assetCode}</b>`, {
         parse_mode: "HTML",
       });
@@ -409,19 +440,19 @@ async function handleText(bot, msg, { telegramId } = {}) {
       return true;
     }
 
-    if (step === "admin:inv:editNote") {
+    if (step === STEPS.EDIT_NOTE) {
       const unitId = session.data._invEditId;
       const model = session.data._invEditModel;
       const note = text === "/skip" ? null : text;
       await inventoryAssetService.updateAsset(unitId, { notes: note }, adminContext);
-      sessionStore.clearSession(chatId);
+      resetConversation(chatId);
       await bot.sendMessage(chatId, "✅ Izoh yangilandi.");
       if (model) await sendModelPage(bot, chatId, model);
       return true;
     }
 
     if (step === "admin:inv:set") {
-      sessionStore.clearSession(chatId);
+      resetConversation(chatId);
       await bot.sendMessage(
         chatId,
         "ℹ️ Sonni qo'lda o'zgartirish o'chirilgan.\nQurilmani «➕ Qurilma qo'shish» orqali qo'shing."
@@ -429,12 +460,32 @@ async function handleText(bot, msg, { telegramId } = {}) {
       await sendOverview(bot, chatId);
       return true;
     }
+
+    // Ghost / unknown inv step
+    resetConversation(chatId);
+    return false;
   } catch (err) {
-    await bot.sendMessage(chatId, `❌ ${err.message}`);
+    const msgText =
+      err instanceof InventoryAssetError ? err.message : err.message || "Xatolik";
+    // Duplicate / validation: stay on same step for retry — NOT a deadlock (menu/cancel work)
+    if (
+      err?.code === "DUPLICATE_SERIAL" ||
+      err?.code === "DUPLICATE_ASSET_CODE" ||
+      /allaqachon mavjud/i.test(msgText)
+    ) {
+      await bot.sendMessage(
+        chatId,
+        `❗️ ${msgText}\n\nBoshqa kod/serial kiriting, /skip yoki /cancel`,
+        cancelKeyboard()
+      );
+      return true;
+    }
+    // Unexpected: hard reset so admin never stuck
+    resetConversation(chatId);
+    await bot.sendMessage(chatId, `❗️ ${msgText}\nSessiya tozalandi.`);
+    await sendOverview(bot, chatId);
     return true;
   }
-
-  return false;
 }
 
 module.exports = {
@@ -448,4 +499,5 @@ module.exports = {
   handleText,
   STATUS_ICON,
   STATUS_SHORT,
+  STEPS,
 };

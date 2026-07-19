@@ -96,6 +96,33 @@ async function getById(id) {
   return prisma.inventoryItem.findUnique({ where: { id: Number(id) } });
 }
 
+async function findByInventoryNumber(inventoryNumber) {
+  const num = String(inventoryNumber || "").trim().toUpperCase();
+  if (!num) return null;
+  return prisma.inventoryItem.findUnique({ where: { inventoryNumber: num } });
+}
+
+async function findBySerialNumber(serialNumber) {
+  const sn = String(serialNumber || "").trim();
+  if (!sn) return null;
+  return prisma.inventoryItem.findFirst({ where: { serialNumber: sn } });
+}
+
+/** Throws InventoryItemError DUPLICATE if number or serial already taken. */
+async function assertUniqueIdentifiers({ inventoryNumber, serialNumber }) {
+  const byNum = await findByInventoryNumber(inventoryNumber);
+  if (byNum) {
+    throw new InventoryItemError(
+      "DUPLICATE",
+      `Inventory Number allaqachon mavjud: ${byNum.inventoryNumber}`
+    );
+  }
+  const bySn = await findBySerialNumber(serialNumber);
+  if (bySn) {
+    throw new InventoryItemError("DUPLICATE", "Serial allaqachon mavjud");
+  }
+}
+
 async function setStatus(tx, itemId, toStatus, { orderId, actorType, actorId, note, reservedOrderId } = {}) {
   const client = tx || prisma;
   const item = await client.inventoryItem.findUnique({ where: { id: Number(itemId) } });
@@ -214,6 +241,9 @@ module.exports = {
   listAvailable,
   listByType,
   getById,
+  findByInventoryNumber,
+  findBySerialNumber,
+  assertUniqueIdentifiers,
   setStatus,
   lockItems,
   releaseItems,
