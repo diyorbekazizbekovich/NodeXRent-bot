@@ -57,10 +57,14 @@ function registerAdminOrderHandlers(bot, isAdmin) {
         await bot.sendMessage(chatId, "⏳ Ushbu buyurtmani hali tasdiqlab bo'lmaydi.");
       } else if (action === "confirm") {
         const orderId = Number(parts[3]);
-        await orderAssignmentService.confirmOrderByAdmin(orderId, telegramId);
+        const confirmed = await orderAssignmentService.confirmOrderByAdmin(orderId, telegramId);
+        const unitCode = confirmed.inventoryUnit?.unitCode || "—";
         await bot.sendMessage(
           chatId,
-          `✅ Buyurtma #${orderId} tasdiqlandi (ADMIN_CONFIRMED).\n🚚 Kuryerlar navbatiga yuborildi.`
+          `✅ Buyurtma #${orderId} tasdiqlandi (ADMIN_CONFIRMED).\n` +
+            `🏷 Qurilma bron qilindi: <b>${unitCode}</b> (RESERVED)\n` +
+            `🚚 Kuryerlar navbatiga yuborildi.`,
+          { parse_mode: "HTML" }
         );
         try {
           await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {

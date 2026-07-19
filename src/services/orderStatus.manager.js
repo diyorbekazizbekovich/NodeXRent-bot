@@ -119,24 +119,29 @@ async function transitionOrderStatus({
 }
 
 /**
- * Atomic claim: pool status + no courier → COURIER_ASSIGNED with device.
+ * Atomic claim: pool status + no courier → COURIER_ASSIGNED.
+ * InventoryUnit must already be reserved on the order (admin approve).
+ * playstationId is optional legacy (courier-owned device table) — not required.
  */
-async function claimOrderForCourier(tx, { orderId, courierId, playstationId, extra = {} }) {
+async function claimOrderForCourier(tx, { orderId, courierId, playstationId = null, extra = {} }) {
   const pool = [OrderStatus.ADMIN_CONFIRMED, OrderStatus.ACCEPTED];
+  const data = {
+    courierId: Number(courierId),
+    status: OrderStatus.COURIER_ASSIGNED,
+    acceptedAt: new Date(),
+    assignedAt: new Date(),
+    ...extra,
+  };
+  if (playstationId != null) {
+    data.playstationId = Number(playstationId);
+  }
   const result = await tx.order.updateMany({
     where: {
       id: Number(orderId),
       status: { in: pool },
       courierId: null,
     },
-    data: {
-      courierId: Number(courierId),
-      playstationId: Number(playstationId),
-      status: OrderStatus.COURIER_ASSIGNED,
-      acceptedAt: new Date(),
-      assignedAt: new Date(),
-      ...extra,
-    },
+    data,
   });
   return result;
 }

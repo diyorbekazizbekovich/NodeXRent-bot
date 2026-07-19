@@ -25,33 +25,19 @@ async function onOrderCreated(order) {
 }
 
 /**
- * Admin confirms PENDING → ADMIN_CONFIRMED, then fan-out to courier pool.
+ * Admin confirms PENDING → ADMIN_CONFIRMED and permanently reserves InventoryUnit.
+ * Transaction: reserve unit + update order + audit. Courier later receives that exact unit.
  */
-async function confirmByAdmin(orderId, adminTelegramId) {
-  const order = await orderRepository.findById(orderId);
-  if (!order) throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
-
-  const orderConfirmationService = require("./orderConfirmation.service");
-  orderConfirmationService.assertCanConfirmOrder(order);
-
-  if (order.status !== OrderStatus.PENDING) {
-    throw new OrderAssignmentError(
-      "NOT_AVAILABLE",
-      `Faqat PENDING buyurtmani tasdiqlash mumkin (hozir: ${order.status})`
-    );
-  }
+async function confirmByAdmin(orderId, adminTelegramId, { unitId = null } = {}) {
+  const orderReservationService = require("./orderReservation.service");
 
   let updated;
   try {
-    updated = await orderStatusManager.transitionOrderStatus({
+    updated = await orderReservationService.confirmOrderWithReservation(
       orderId,
-      toStatus: OrderStatus.ADMIN_CONFIRMED,
-      actorType: "admin",
-      actorId: adminTelegramId,
-      note: "Admin buyurtmani tasdiqladi — kuryer navbatiga yuborildi",
-      timestamps: { confirmedAt: new Date(), isHighPriority: false },
-      syncDevice: false,
-    });
+      adminTelegramId,
+      { unitId }
+    );
   } catch (err) {
     throw wrapStatusError(err);
   }
@@ -62,7 +48,11 @@ async function confirmByAdmin(orderId, adminTelegramId) {
     action: "ORDER_ADMIN_CONFIRMED",
     entityType: "Order",
     entityId: orderId,
-    afterData: { status: OrderStatus.ADMIN_CONFIRMED },
+    afterData: {
+      status: OrderStatus.ADMIN_CONFIRMED,
+      inventoryUnitId: updated.inventoryUnitId,
+      unitCode: updated.inventoryUnit?.unitCode || null,
+    },
   });
 
   try {

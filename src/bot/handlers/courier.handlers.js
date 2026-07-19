@@ -340,10 +340,16 @@ function register(bot) {
         );
       } else if (action === "accept") {
         const order = await orderAssignmentService.acceptOrderByCourier(orderId, courier.id);
+        const unitCode = order.inventoryUnit?.unitCode || "—";
         await bot.sendMessage(
           chatId,
-          `✅ Buyurtma #${order.id} qabul qilindi (COURIER_ASSIGNED).`,
-          courierKeyboards.assignedOrderKeyboard(order.id)
+          `✅ Buyurtma #${order.id} qabul qilindi (COURIER_ASSIGNED).\n` +
+            `🏷 Qurilma: <b>${unitCode}</b>\n` +
+            `📌 Status: RESERVED → yetkazib berish`,
+          {
+            parse_mode: "HTML",
+            reply_markup: courierKeyboards.assignedOrderKeyboard(order.id).reply_markup,
+          }
         );
         await clearInlineKeyboard(bot, query);
       } else if (action === "reject") {

@@ -27,6 +27,7 @@ check("RENTED not assignable", !isAssignable("RENTED"));
 check("RESERVED not assignable", !isAssignable("RESERVED"));
 check("DEFECTIVE blocked", BLOCKED_DEVICE_STATUSES.includes("DEFECTIVE"));
 
+check("ADMIN_CONFIRMED → RESERVED", expectedDeviceStatus("ADMIN_CONFIRMED") === DeviceStatus.RESERVED);
 check("COURIER_ASSIGNED → RESERVED", expectedDeviceStatus("COURIER_ASSIGNED") === DeviceStatus.RESERVED);
 check("ON_THE_WAY → RESERVED", expectedDeviceStatus("ON_THE_WAY") === DeviceStatus.RESERVED);
 check("ACTIVE → RENTED", expectedDeviceStatus("ACTIVE") === DeviceStatus.RENTED);
@@ -34,8 +35,8 @@ check("DELIVERED → RENTED", expectedDeviceStatus("DELIVERED") === DeviceStatus
 check("EXPIRED → RENTED (not AVAILABLE)", expectedDeviceStatus("EXPIRED") === DeviceStatus.RENTED);
 check("CANCELLED → AVAILABLE", expectedDeviceStatus("CANCELLED") === DeviceStatus.AVAILABLE);
 check("REJECTED → AVAILABLE", expectedDeviceStatus("REJECTED") === DeviceStatus.AVAILABLE);
-check("RETURNED → AVAILABLE", expectedDeviceStatus("RETURNED") === DeviceStatus.AVAILABLE);
-check("COMPLETED → AVAILABLE", expectedDeviceStatus("COMPLETED") === DeviceStatus.AVAILABLE);
+check("RETURNED → INSPECTION", expectedDeviceStatus("RETURNED") === DeviceStatus.INSPECTION);
+check("COMPLETED → INSPECTION", expectedDeviceStatus("COMPLETED") === DeviceStatus.INSPECTION);
 
 check(
   "expire never maps to AVAILABLE",

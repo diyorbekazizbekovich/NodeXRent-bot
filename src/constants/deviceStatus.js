@@ -47,7 +47,8 @@ const BLOCKED_DEVICE_STATUSES = Object.freeze([
  */
 const ORDER_TO_DEVICE_STATUS = Object.freeze({
   PENDING: null,
-  ADMIN_CONFIRMED: null,
+  /** InventoryUnit already RESERVED at admin approve (Order.inventoryUnitId bound). */
+  ADMIN_CONFIRMED: DeviceStatus.RESERVED,
   COURIER_ASSIGNED: DeviceStatus.RESERVED,
   ACCEPTED: DeviceStatus.RESERVED,
   ON_THE_WAY: DeviceStatus.RESERVED,

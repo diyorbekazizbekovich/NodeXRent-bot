@@ -3,6 +3,14 @@
  * Single source of truth for console asset lifecycle.
  */
 
+/**
+ * Physical console asset statuses (DB enum PlaystationStatus).
+ * Business aliases (docs / future migration):
+ *   ON_DELIVERY ≈ RESERVED while courier delivers
+ *   RETURN_PENDING ≈ INSPECTION after pickup
+ *   UNDER_REPAIR ≈ MAINTENANCE
+ *   BROKEN ≈ DEFECTIVE / DISABLED
+ */
 const AssetStatus = Object.freeze({
   AVAILABLE: "AVAILABLE",
   RESERVED: "RESERVED",
@@ -14,6 +22,14 @@ const AssetStatus = Object.freeze({
   /** Legacy — still present on some rows / PlayStation devices */
   MISSING_PARTS: "MISSING_PARTS",
   DEFECTIVE: "DEFECTIVE",
+});
+
+/** Semantic aliases — same values as AssetStatus (no separate DB enums yet) */
+const AssetStatusAlias = Object.freeze({
+  ON_DELIVERY: AssetStatus.RESERVED,
+  RETURN_PENDING: AssetStatus.INSPECTION,
+  UNDER_REPAIR: AssetStatus.MAINTENANCE,
+  BROKEN: AssetStatus.DEFECTIVE,
 });
 
 /** Strict business transitions (asset management). */
@@ -55,10 +71,14 @@ const ACTIVE_POOL_STATUSES = Object.freeze([
   AssetStatus.MAINTENANCE,
 ]);
 
-/** Order statuses that keep inventoryUnitId "occupied" */
+/**
+ * Order statuses that keep inventoryUnitId occupied (unique index + conflict checks).
+ * ADMIN_CONFIRMED included: reservation happens at admin approve, before courier accept.
+ */
 const UNIT_OCCUPYING_ORDER_STATUSES = Object.freeze([
-  "COURIER_ASSIGNED",
+  "ADMIN_CONFIRMED",
   "ACCEPTED",
+  "COURIER_ASSIGNED",
   "ON_THE_WAY",
   "ARRIVED",
   "DELIVERED",
@@ -97,6 +117,7 @@ function isNonDeletable(status) {
 
 module.exports = {
   AssetStatus,
+  AssetStatusAlias,
   ALLOWED_TRANSITIONS,
   ASSIGNABLE_STATUSES,
   OCCUPYING_STATUSES,

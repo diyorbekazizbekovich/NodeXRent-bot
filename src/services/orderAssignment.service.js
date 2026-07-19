@@ -74,7 +74,7 @@ async function assignOrderByAdmin(orderId, courierId) {
     throw new OrderAssignmentError("COURIER_INACTIVE", "Kuryer faol emas");
   }
 
-  const order = await orderRepository.findById(orderId);
+  let order = await orderRepository.findById(orderId);
   if (!order) throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
 
   if (!isCourierPoolStatus(order.status) || order.courierId) {
@@ -82,6 +82,21 @@ async function assignOrderByAdmin(orderId, courierId) {
       "NOT_AVAILABLE",
       "Faqat ADMIN_CONFIRMED (kuryersiz) buyurtmaga emergency biriktirish mumkin"
     );
+  }
+
+  // Ensure reservation exists (same contract as courier accept)
+  if (!order.inventoryUnitId) {
+    const orderReservationService = require("./orderReservation.service");
+    const prisma = require("../config/prisma");
+    await prisma.$transaction(async (tx) => {
+      await orderReservationService.reserveUnitForOrder(tx, {
+        orderId,
+        consoleType: order.consoleType,
+        actorType: "admin",
+        actorId: null,
+      });
+    });
+    order = await orderRepository.findById(orderId);
   }
 
   await courierWorkflowService.assignWithRetry(orderId, courierId, order, {

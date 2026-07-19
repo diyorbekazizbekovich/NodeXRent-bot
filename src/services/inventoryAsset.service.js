@@ -144,6 +144,9 @@ async function changeStatus(
 /**
  * Find AVAILABLE unit for model and lock RESERVED (race-safe via updateMany).
  * Links inventoryUnitId on the order. Never assigns the same unit twice.
+ *
+ * Primary caller: orderReservation.service (admin approve).
+ * Courier accept must NOT call this to "find first available" — it uses the bound unit.
  */
 async function reserveForOrder(tx, { orderId, consoleType, actorType = "system", actorId = null }) {
   const client = clientOf(tx);

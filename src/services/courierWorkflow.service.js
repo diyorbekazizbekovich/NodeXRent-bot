@@ -8,7 +8,6 @@ const { DeviceStatusError } = require("./deviceStatus.service");
 const orderStatusManager = require("./orderStatus.manager");
 const orderNotificationService = require("./orderNotification.service");
 const orderWorkflowService = require("./orderWorkflow.service");
-const orderResourceService = require("./orderResource.service");
 const { OrderAssignmentError } = require("../errors/order.errors");
 const { OrderStatusError } = require("./orderStatus.manager");
 const prisma = require("../config/prisma");
@@ -34,59 +33,51 @@ function wrap(err) {
   return err;
 }
 
-async function claimPlaystationAndAssign(orderId, courierId, playstationId, extra = {}) {
+/**
+ * Assign courier to order that already has a reserved InventoryUnit.
+ * Does NOT search AVAILABLE inventory. Optional legacy Playstation claim is best-effort.
+ */
+async function claimReservedOrderForCourier(orderId, courierId, extra = {}) {
+  const orderReservationService = require("./orderReservation.service");
+
   return prisma.$transaction(async (tx) => {
-    if (!playstationId) {
-      throw new OrderAssignmentError(
-        "NO_DEVICE",
-        "Bo'sh PlayStation yo'q. Boshqa kuryer yoki keyinroq urinib ko'ring."
-      );
-    }
+    const unit = await orderReservationService.getReservedUnitForOrder(tx, orderId);
 
+    // Optional legacy: courier-owned Playstation row (not required for warehouse inventory)
+    let playstationId = null;
     try {
-      await deviceStatusService.claimPlaystation(tx, playstationId, {
-        orderId,
-        reason: "ORDER_ASSIGN",
+      const orderRow = await tx.order.findUnique({
+        where: { id: Number(orderId) },
+        select: { consoleType: true, startDatetime: true, endDatetime: true },
       });
-    } catch (err) {
-      if (err instanceof DeviceStatusError) {
-        throw new OrderAssignmentError("NO_DEVICE", err.message);
-      }
-      throw err;
-    }
-
-    // Reserve a physical InventoryUnit asset when stock exists for this model
-    const inventoryAssetService = require("./inventoryAsset.service");
-    const orderForType = await tx.order.findUnique({
-      where: { id: Number(orderId) },
-      select: { consoleType: true, inventoryUnitId: true },
-    });
-    let reservedUnitId = orderForType?.inventoryUnitId || null;
-    if (orderForType?.consoleType) {
-      const unitCount = await tx.inventoryUnit.count({
-        where: { consoleType: orderForType.consoleType },
-      });
-      if (unitCount > 0 && !reservedUnitId) {
-        const unit = await inventoryAssetService.reserveForOrder(tx, {
-          orderId,
-          consoleType: orderForType.consoleType,
-          actorType: "courier",
-          actorId: courierId,
-        });
-        if (!unit) {
-          await deviceStatusService.syncDeviceToOrderStatus(
-            tx,
-            { id: orderId, playstationId },
-            OrderStatus.CANCELLED,
-            { reason: "NO_INVENTORY_UNIT_ROLLBACK" }
-          );
-          throw new OrderAssignmentError(
-            "NO_INVENTORY",
-            "Bo'sh inventar qurilmasi yo'q (AVAILABLE). Keyinroq urinib ko'ring."
-          );
+      const availablePs = await playstationService.findAvailableForCourier(
+        courierId,
+        orderRow.consoleType,
+        orderRow.startDatetime,
+        orderRow.endDatetime
+      );
+      if (availablePs) {
+        try {
+          await deviceStatusService.claimPlaystation(tx, availablePs.id, {
+            orderId,
+            reason: "ORDER_ASSIGN_OPTIONAL",
+          });
+          playstationId = availablePs.id;
+        } catch (err) {
+          if (!(err instanceof DeviceStatusError)) throw err;
+          logger.warn("Optional courier Playstation claim skipped", {
+            context: "CourierWorkflow",
+            orderId,
+            error: err.message,
+          });
         }
-        reservedUnitId = unit.id;
       }
+    } catch (err) {
+      logger.warn("Optional Playstation lookup skipped", {
+        context: "CourierWorkflow",
+        orderId,
+        error: err.message,
+      });
     }
 
     try {
@@ -94,20 +85,19 @@ async function claimPlaystationAndAssign(orderId, courierId, playstationId, extr
         orderId,
         courierId,
         playstationId,
-        extra: { ...extra, ...(reservedUnitId ? { inventoryUnitId: reservedUnitId } : {}) },
+        extra: {
+          ...extra,
+          inventoryUnitId: unit.id,
+        },
       });
       if (result.count === 0) {
-        await deviceStatusService.syncDeviceToOrderStatus(
-          tx,
-          { id: orderId, playstationId, inventoryUnitId: reservedUnitId },
-          OrderStatus.CANCELLED,
-          { reason: "ASSIGN_ROLLBACK" }
-        );
-        if (reservedUnitId) {
-          await tx.order.update({
-            where: { id: Number(orderId) },
-            data: { inventoryUnitId: null },
-          });
+        if (playstationId) {
+          await deviceStatusService.syncDeviceToOrderStatus(
+            tx,
+            { id: orderId, playstationId },
+            OrderStatus.CANCELLED,
+            { reason: "ASSIGN_ROLLBACK_PS_ONLY" }
+          );
         }
         throw new OrderAssignmentError(
           "ALREADY_ACCEPTED",
@@ -121,33 +111,29 @@ async function claimPlaystationAndAssign(orderId, courierId, playstationId, extr
         {
           actorType: "courier",
           actorId: courierId,
-          note: "Kuryer buyurtmani qabul qildi — device RESERVED",
+          note: `Kuryer qabul qildi — inventar ${unit.unitCode} (RESERVED)`,
         },
         tx
       );
 
-      return result;
+      return { unit, playstationId };
     } catch (err) {
       if (
         err?.code === "P2002" ||
         String(err?.message || "").includes("orders_unique_occupying_playstation") ||
         String(err?.message || "").includes("orders_unique_occupying_inventory_unit")
       ) {
-        await deviceStatusService.syncDeviceToOrderStatus(
-          tx,
-          { id: orderId, playstationId, inventoryUnitId: reservedUnitId },
-          OrderStatus.CANCELLED,
-          { reason: "UNIQUE_PS_ROLLBACK" }
-        );
-        if (reservedUnitId) {
-          await tx.order.update({
-            where: { id: Number(orderId) },
-            data: { inventoryUnitId: null },
-          });
+        if (playstationId) {
+          await deviceStatusService.syncDeviceToOrderStatus(
+            tx,
+            { id: orderId, playstationId },
+            OrderStatus.CANCELLED,
+            { reason: "UNIQUE_PS_ROLLBACK" }
+          );
         }
         throw new OrderAssignmentError(
-          "NO_DEVICE",
-          "PlayStation allaqachon boshqa buyurtmaga biriktirilgan — boshqa qurilma tanlang"
+          "ALREADY_ACCEPTED",
+          "Buyurtma yoki qurilma allaqachon boshqa kuryerga biriktirilgan"
         );
       }
       throw err;
@@ -155,43 +141,10 @@ async function claimPlaystationAndAssign(orderId, courierId, playstationId, extr
   });
 }
 
+/** @deprecated Use claimReservedOrderForCourier — kept for emergency admin assign API. */
 async function assignWithRetry(orderId, courierId, order, { assignedByAdmin }) {
-  const maxAttempts = 5;
-  let lastErr = null;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const available = await playstationService.findAvailableForCourier(
-      courierId,
-      order.consoleType,
-      order.startDatetime,
-      order.endDatetime
-    );
-    if (!available) {
-      throw new OrderAssignmentError(
-        "NO_DEVICE",
-        "Bo'sh PlayStation yo'q (faqat Available). Ta'mirdagi yoki band qurilmalar chiqarilmaydi."
-      );
-    }
-
-    try {
-      await claimPlaystationAndAssign(orderId, courierId, available.id, { assignedByAdmin });
-      return available.id;
-    } catch (err) {
-      lastErr = err;
-      if (err instanceof OrderAssignmentError && err.code === "NO_DEVICE") {
-        logger.warn("Device claim race — retrying next PS", {
-          context: "CourierWorkflow",
-          orderId,
-          attempt,
-          playstationId: available.id,
-        });
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  throw lastErr || new OrderAssignmentError("NO_DEVICE", "PlayStation band qilib bo'lmadi");
+  await claimReservedOrderForCourier(orderId, courierId, { assignedByAdmin });
+  return order.inventoryUnitId || null;
 }
 
 /**
@@ -203,7 +156,7 @@ async function acceptOrder(orderId, courierId) {
     throw new OrderAssignmentError("COURIER_INACTIVE", "Kuryer faol emas");
   }
 
-  const order = await orderRepository.findById(orderId);
+  let order = await orderRepository.findById(orderId);
   if (!order) throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
 
   if (order.courierId && order.courierId !== courierId) {
@@ -232,7 +185,28 @@ async function acceptOrder(orderId, courierId) {
     throw new OrderAssignmentError("FORBIDDEN", "Siz bu buyurtmani avval rad etgansiz");
   }
 
-  await assignWithRetry(orderId, courierId, order, { assignedByAdmin: false });
+  // Legacy heal: ADMIN_CONFIRMED without unit (pre-reservation architecture)
+  if (!order.inventoryUnitId) {
+    const orderReservationService = require("./orderReservation.service");
+    await prisma.$transaction(async (tx) => {
+      await orderReservationService.reserveUnitForOrder(tx, {
+        orderId,
+        consoleType: order.consoleType,
+        actorType: "system",
+        actorId: courierId,
+      });
+    });
+    order = await orderRepository.findById(orderId);
+  }
+
+  if (!order.inventoryUnitId) {
+    throw new OrderAssignmentError(
+      "NO_RESERVATION",
+      "Buyurtmaga inventar biriktirilmagan. Admin qayta tasdiqlashi kerak."
+    );
+  }
+
+  await claimReservedOrderForCourier(orderId, courierId, { assignedByAdmin: false });
 
   await prisma.order.update({
     where: { id: orderId },
@@ -277,25 +251,29 @@ async function rejectOrder(orderId, courierId) {
 
   const courier = await courierRepository.findById(courierId);
 
-  // If already assigned to this courier — release back to pool
+  // If already assigned — release courier (+ optional Playstation) but KEEP reserved InventoryUnit
   if (order.courierId === courierId && order.status === OrderStatus.COURIER_ASSIGNED) {
     await prisma.$transaction(async (tx) => {
-      const fresh = await tx.order.findUnique({
-        where: { id: orderId },
-        include: orderResourceService.RELEASE_INCLUDE,
-      });
-      await orderResourceService.releaseOrderResources(tx, fresh, {
-        actorType: "courier",
-        actorId: courierId,
-        reason: "COURIER_DECLINE_REQUEUE",
-      });
+      const fresh = await tx.order.findUnique({ where: { id: orderId } });
+      if (fresh?.playstationId) {
+        await deviceStatusService.syncDeviceToOrderStatus(
+          tx,
+          { id: orderId, playstationId: fresh.playstationId },
+          OrderStatus.CANCELLED,
+          {
+            actorType: "courier",
+            actorId: courierId,
+            reason: "COURIER_DECLINE_REQUEUE_PS_ONLY",
+          }
+        );
+      }
+      // InventoryUnit stays RESERVED + inventoryUnitId stays on order for next courier
       await tx.order.update({
         where: { id: orderId },
         data: {
           status: OrderStatus.ADMIN_CONFIRMED,
           courierId: null,
           playstationId: null,
-          inventoryUnitId: null,
           acceptedAt: null,
           assignedAt: null,
           assignedByAdmin: false,
@@ -307,7 +285,7 @@ async function rejectOrder(orderId, courierId) {
         {
           actorType: "courier",
           actorId: courierId,
-          note: "Kuryer rad etdi — qayta navbatga",
+          note: "Kuryer rad etdi — inventar bron saqlanadi, qayta navbatga",
         },
         tx
       );
@@ -569,6 +547,8 @@ module.exports = {
   listCourierDashboard,
   listEligibleCouriers,
   ACTIVE_COURIER_STATUSES,
-  claimPlaystationAndAssign,
+  claimReservedOrderForCourier,
+  /** @deprecated alias */
+  claimPlaystationAndAssign: claimReservedOrderForCourier,
   assignWithRetry,
 };
