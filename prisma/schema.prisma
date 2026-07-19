@@ -171,8 +171,52 @@ model Courier {
   orders       Order[]
   deliveredOrders Order[]    @relation("OrderDeliveredBy")
   orderRejections OrderCourierRejection[]
+  deliverySessions DeliverySession[]
 
   @@map("couriers")
+}
+
+/// Persistent courier delivery (handover) wizard state — survives restarts / RAM clears.
+enum DeliverySessionStep {
+  JOYSTICKS
+  HDMI
+  POWER
+  COLLATERAL
+  COLLATERAL_CONFIRM
+  PAYMENT
+  PHOTO
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliverySessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model DeliverySession {
+  id                  Int                    @id @default(autoincrement())
+  orderId             Int                    @unique
+  order               Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courierId           Int
+  courier             Courier                @relation(fields: [courierId], references: [id])
+  inventoryUnitId     Int?
+  /// Legacy optional InventoryItem CONSOLE (not used for InventoryUnit flow)
+  consoleItemId       Int?
+  selectedJoystickIds Json                   @default("[]")
+  selectedHdmiId      Int?
+  selectedPowerId     Int?
+  documentType        String?
+  paymentMethod       String?
+  currentStep         DeliverySessionStep    @default(JOYSTICKS)
+  status              DeliverySessionStatus  @default(IN_PROGRESS)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([courierId, status])
+  @@index([status, currentStep])
+  @@map("delivery_sessions")
 }
 
 model Playstation {
@@ -427,6 +471,7 @@ model Order {
   photos           OrderPhoto[]
   reminderLogs     OrderReminderLog[]
   courierRejections OrderCourierRejection[]
+  deliverySession  DeliverySession?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -126,9 +126,18 @@ function register(bot) {
     const courier = await courierService.getCourierByTelegramId(telegramId).catch(() => null);
 
     // Topshirish/qaytarish PHOTO bosqichida non-photo → rad etish
+    // Handover PHOTO may live only in DeliverySession (DB) after RAM clear
+    let handoverAwaitingPhoto = session.step === handoverWizard.STEPS.PHOTO;
+    if (courier && !handoverAwaitingPhoto) {
+      try {
+        const deliverySessionService = require("../../services/deliverySession.service");
+        const ds = await deliverySessionService.getPhotoSessionForCourier(courier.id);
+        handoverAwaitingPhoto = Boolean(ds);
+      } catch (_) {}
+    }
     if (
       courier &&
-      (session.step === handoverWizard.STEPS.PHOTO || session.step === returnWizard.STEPS.PHOTO)
+      (handoverAwaitingPhoto || session.step === returnWizard.STEPS.PHOTO)
     ) {
       await bot.sendMessage(chatId, "❌ Iltimos faqat rasm yuboring.");
       return;
@@ -393,7 +402,7 @@ function register(bot) {
           if (current?.status !== "ARRIVED") {
             await orderAssignmentService.updateCourierOrderStatus(orderId, courier.id, "ARRIVED");
           }
-          await handoverWizard.startHandoverWizard(bot, chatId, orderId);
+          await handoverWizard.startHandoverWizard(bot, chatId, orderId, courier);
         }
       } else if (action === "delivered") {
         const current = await orderService.getOrderById(orderId);
@@ -406,7 +415,7 @@ function register(bot) {
             courierKeyboards.activeRentalKeyboard(orderId, remaining)
           );
         } else {
-          await handoverWizard.startHandoverWizard(bot, chatId, orderId);
+          await handoverWizard.startHandoverWizard(bot, chatId, orderId, courier);
         }
       } else if (action === "rentalInfo") {
         const current = await orderService.getOrderById(orderId);

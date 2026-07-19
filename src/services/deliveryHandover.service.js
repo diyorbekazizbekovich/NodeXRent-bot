@@ -109,6 +109,12 @@ async function completeHandover({
     if (!HANDOVER_ALLOWED_FROM.has(order.status)) {
       throw new DeliveryHandoverError("INVALID_STATUS", `Noto'g'ri holat: ${order.status}`);
     }
+    if (!order.inventoryUnitId) {
+      throw new DeliveryHandoverError(
+        "NO_UNIT",
+        "Buyurtmaga InventoryUnit biriktirilmagan. Admin qayta tasdiqlashi kerak."
+      );
+    }
 
     // Legacy optional CONSOLE InventoryItem — primary console is InventoryUnit
     let consoleItem = null;
@@ -272,6 +278,10 @@ async function completeHandover({
       });
     }
 
+    // Persist wizard completion inside same transaction
+    const deliverySessionService = require("./deliverySession.service");
+    await deliverySessionService.markCompleted(order.id, tx);
+
     return {
       orderId: order.id,
       basePrice,
@@ -286,6 +296,7 @@ async function completeHandover({
       hdmi,
       power,
       orderSnapshot: order,
+      inventoryUnitId: order.inventoryUnitId,
     };
   });
 
