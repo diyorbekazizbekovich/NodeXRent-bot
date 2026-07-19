@@ -125,8 +125,14 @@ function register(bot) {
     const session = sessionStore.getSession(chatId);
     const courier = await courierService.getCourierByTelegramId(telegramId).catch(() => null);
 
-    // Topshirish/qaytarish PHOTO bosqichida non-photo → rad etish
-    // Handover PHOTO may live only in DeliverySession (DB) after RAM clear
+    // Menu / cancel MUST escape photo-wait trap (never block forever)
+    if (courier && msg.text) {
+      const abortResult = await handoverWizard.handleAbortText(bot, msg, courier);
+      if (abortResult === "aborted") return; // cancel consumed
+      // "cleared" → fall through to menu handlers
+    }
+
+    // Topshirish/qaytarish PHOTO — non-photo text (not menu) gets hint + cancel
     let handoverAwaitingPhoto = session.step === handoverWizard.STEPS.PHOTO;
     if (courier && !handoverAwaitingPhoto) {
       try {
@@ -139,7 +145,18 @@ function register(bot) {
       courier &&
       (handoverAwaitingPhoto || session.step === returnWizard.STEPS.PHOTO)
     ) {
-      await bot.sendMessage(chatId, "❌ Iltimos faqat rasm yuboring.");
+      const orderId =
+        session.data?._hwOrderId ||
+        session.data?._retOrderId ||
+        null;
+      await bot.sendMessage(
+        chatId,
+        "❌ Hozir faqat rasm kutilmoqda.\n" +
+          "Rasm yuboring yoki «❌ Bekor qilish» / menyu tugmasini bosing.",
+        orderId
+          ? courierKeyboards.handoverWizardCancelKeyboard(orderId)
+          : courierKeyboards.mainMenuKeyboard()
+      );
       return;
     }
 

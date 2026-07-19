@@ -79,8 +79,14 @@ async function saveOrderPhoto(bot, { orderId, photoType, telegramFileId }) {
 }
 
 function extractLargestPhotoFileId(msg) {
-  if (!msg.photo || !msg.photo.length) return null;
-  return msg.photo[msg.photo.length - 1].file_id;
+  if (msg.photo?.length) {
+    return msg.photo[msg.photo.length - 1].file_id;
+  }
+  // Some clients send image as document
+  if (msg.document?.mime_type?.startsWith("image/") && msg.document.file_id) {
+    return msg.document.file_id;
+  }
+  return null;
 }
 
 module.exports = {

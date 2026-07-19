@@ -40,6 +40,9 @@ function joystickPickKeyboard(orderId, joysticks, selectedIds = []) {
       callback_data: `courier:hw:jsDone:${orderId}`,
     },
   ]);
+  rows.push([
+    { text: "❌ Wizardni bekor qilish", callback_data: `courier:hw:cancel:${orderId}` },
+  ]);
   return { reply_markup: { inline_keyboard: rows } };
 }
 
@@ -49,6 +52,9 @@ function singlePickKeyboard(orderId, items, kind) {
   if (!rows.length) {
     rows.push([{ text: "❌ Mavjud emas", callback_data: "courier:hw:noop" }]);
   }
+  rows.push([
+    { text: "❌ Wizardni bekor qilish", callback_data: `courier:hw:cancel:${orderId}` },
+  ]);
   return { reply_markup: { inline_keyboard: rows } };
 }
 

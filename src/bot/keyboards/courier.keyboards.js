@@ -145,6 +145,16 @@ function pickedUpKeyboard(orderId) {
   };
 }
 
+function handoverWizardCancelKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "❌ Bekor qilish", callback_data: `courier:hw:cancel:${orderId}` }],
+      ],
+    },
+  };
+}
+
 /** Topshirish 1-bosqich: garov hujjati */
 function handoverCollateralKeyboard(orderId) {
   return {
@@ -153,6 +163,7 @@ function handoverCollateralKeyboard(orderId) {
         [{ text: "🪪 ID Karta", callback_data: `courier:handover:collateral:${orderId}:ID_CARD` }],
         [{ text: "📕 Passport", callback_data: `courier:handover:collateral:${orderId}:PASSPORT` }],
         [{ text: "❌ Hujjat olinmadi", callback_data: `courier:handover:collateral:${orderId}:NONE` }],
+        [{ text: "❌ Wizardni bekor qilish", callback_data: `courier:hw:cancel:${orderId}` }],
       ],
     },
   };
@@ -181,6 +192,7 @@ function handoverPaymentKeyboard(orderId) {
           { text: "💵 Naqd", callback_data: `courier:handover:pay:${orderId}:CASH` },
           { text: "💳 Karta", callback_data: `courier:handover:pay:${orderId}:CARD` },
         ],
+        [{ text: "❌ Wizardni bekor qilish", callback_data: `courier:hw:cancel:${orderId}` }],
       ],
     },
   };
@@ -209,5 +221,6 @@ module.exports = {
   handoverCollateralKeyboard,
   handoverNoneConfirmKeyboard,
   handoverPaymentKeyboard,
+  handoverWizardCancelKeyboard,
   cancelKeyboard,
 };

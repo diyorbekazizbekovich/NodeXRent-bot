@@ -278,9 +278,8 @@ async function completeHandover({
       });
     }
 
-    // Persist wizard completion inside same transaction
-    const deliverySessionService = require("./deliverySession.service");
-    await deliverySessionService.markCompleted(order.id, tx);
+    // Do NOT mark DeliverySession COMPLETED inside TX — post-TX notify used to throw
+    // (meta.console null) after commit, leaving COMPLETED session + orphan RAM photo trap.
 
     return {
       orderId: order.id,
@@ -297,10 +296,18 @@ async function completeHandover({
       power,
       orderSnapshot: order,
       inventoryUnitId: order.inventoryUnitId,
+      unitCode: order.inventoryUnit?.unitCode || null,
     };
   });
 
-  // PDF + photo + notifications (transaction tashqarida)
+  logger.info("Handover TX committed", {
+    context: "DeliveryHandover",
+    orderId: result.orderId,
+    inventoryUnitId: result.inventoryUnitId,
+    unitCode: result.unitCode,
+  });
+
+  // PDF + photo + notifications — MUST NOT fail handover (TX already committed)
   let contract = null;
   try {
     const fullOrder = await orderRepository.findById(result.orderId);
@@ -347,16 +354,47 @@ async function completeHandover({
       }
     }
   } catch (err) {
-    logger.error("Contract/photo post-handover xatoligi", { error: err.message });
+    logger.error("Contract/photo post-handover xatoligi", {
+      error: err.message,
+      stack: err.stack,
+      orderId: result.orderId,
+    });
   }
 
-  const fullOrder = await orderRepository.findById(result.orderId);
-  await notifyHandoverComplete(fullOrder, result, contract);
+  try {
+    const fullOrder = await orderRepository.findById(result.orderId);
+    await notifyHandoverComplete(fullOrder, result, contract);
+  } catch (err) {
+    logger.error("Handover notify failed (delivery already committed)", {
+      error: err.message,
+      stack: err.stack,
+      orderId: result.orderId,
+    });
+  }
 
-  return fullOrder;
+  try {
+    const deliverySessionService = require("./deliverySession.service");
+    await deliverySessionService.markCompleted(result.orderId);
+  } catch (err) {
+    logger.warn("DeliverySession markCompleted failed", {
+      orderId: result.orderId,
+      error: err.message,
+    });
+  }
+
+  return orderRepository.findById(result.orderId);
 }
 
 async function notifyHandoverComplete(order, meta, contract) {
+  // InventoryUnit is primary console — meta.console (InventoryItem) may be null
+  const unitCode =
+    meta.unitCode ||
+    order.inventoryUnit?.unitCode ||
+    meta.console?.inventoryNumber ||
+    order.consoleType ||
+    "—";
+  const serial =
+    order.inventoryUnit?.serialNumber || meta.console?.serialNumber || "—";
   const consoleName =
     order.rentalPrice?.consoleCatalog?.displayName || order.consoleType;
   const durationHours = order.rentalPrice?.hours;
@@ -374,11 +412,11 @@ async function notifyHandoverComplete(order, meta, contract) {
     (contract ? `📄 Shartnoma: ${escapeHtml(contract.contractNumber)}\n` : "") +
     `\n👤 Mijoz: ${escapeHtml(user?.fullName || "—")}\n` +
     `📞 ${escapeHtml(user?.phone || "—")}\n\n` +
-    `🎮 Console: ${escapeHtml(meta.console.inventoryNumber)}\n` +
-    `🔢 Serial: ${escapeHtml(meta.console.serialNumber)}\n` +
+    `🎮 Console: ${escapeHtml(unitCode)}\n` +
+    `🔢 Serial: ${escapeHtml(serial)}\n` +
     `🕹 Joysticklar: ${escapeHtml(js)}\n` +
-    `📺 HDMI: ${escapeHtml(meta.hdmi.inventoryNumber)}\n` +
-    `🔌 Power: ${escapeHtml(meta.power.inventoryNumber)}\n\n` +
+    `📺 HDMI: ${escapeHtml(meta.hdmi?.inventoryNumber || "—")}\n` +
+    `🔌 Power: ${escapeHtml(meta.power?.inventoryNumber || "—")}\n\n` +
     `📅 Ijara: ${escapeHtml(durationLabel)}\n` +
     `💰 Asl: ${escapeHtml(money(meta.basePrice))}\n` +
     `🎁 Promo: ${meta.discount > 0 ? escapeHtml(money(meta.discount)) : "—"}\n` +
@@ -403,23 +441,25 @@ async function notifyHandoverComplete(order, meta, contract) {
   }
 
   const customerText = t("notify.handoverComplete", L, {
-    console: escapeHtml(`${consoleName} (${meta.console.inventoryNumber})`),
+    console: escapeHtml(`${consoleName} (${unitCode})`),
     start: escapeHtml(formatDatetime(order.startDatetime)),
-    end: escapeHtml(formatDatetime(order.endDatetime)),
+    end: escapeHtml(formatDatetime(order.endDatetime || order.expectedReturnAt)),
     paid: escapeHtml(pricingService.formatMoney(meta.finalPaidAmount, "UZS", L)),
     payment: escapeHtml(t(`handover.payment.${meta.paymentMethod}`, L)),
     collateral: escapeHtml(t(`handover.collateral.${meta.collateralType}`, L)),
   });
 
-  await notify({
-    orderId: order.id,
-    type: "ORDER_DELIVERED",
-    recipientType: "user",
-    recipientTelegramId: user.telegramId.toString(),
-    recipientId: order.userId,
-    text: customerText,
-    options: { parse_mode: "HTML" },
-  });
+  if (user?.telegramId) {
+    await notify({
+      orderId: order.id,
+      type: "ORDER_DELIVERED",
+      recipientType: "user",
+      recipientTelegramId: user.telegramId.toString(),
+      recipientId: order.userId,
+      text: customerText,
+      options: { parse_mode: "HTML" },
+    });
+  }
 }
 
 /**

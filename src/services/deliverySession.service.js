@@ -199,9 +199,46 @@ async function markCompleted(orderId, tx = null) {
 }
 
 async function cancel(orderId) {
+  const existing = await getByOrderId(orderId);
+  if (!existing) return null;
+  if (existing.status !== DeliverySessionStatus.IN_PROGRESS) return existing;
   return patch(orderId, {
     status: DeliverySessionStatus.CANCELLED,
     currentStep: DeliveryStep.CANCELLED,
+  });
+}
+
+const SESSION_TTL_MS = 30 * 60 * 1000;
+
+/** Expire stale IN_PROGRESS sessions (photo trap / abandoned wizards). */
+async function expireStaleSessions({ olderThanMs = SESSION_TTL_MS } = {}) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const result = await prisma.deliverySession.updateMany({
+    where: {
+      status: DeliverySessionStatus.IN_PROGRESS,
+      updatedAt: { lt: cutoff },
+    },
+    data: {
+      status: DeliverySessionStatus.CANCELLED,
+      currentStep: DeliveryStep.CANCELLED,
+      updatedAt: new Date(),
+    },
+  });
+  return result.count;
+}
+
+async function cancelForCourier(courierId, orderId = null) {
+  return prisma.deliverySession.updateMany({
+    where: {
+      courierId: Number(courierId),
+      status: DeliverySessionStatus.IN_PROGRESS,
+      ...(orderId != null ? { orderId: Number(orderId) } : {}),
+    },
+    data: {
+      status: DeliverySessionStatus.CANCELLED,
+      currentStep: DeliveryStep.CANCELLED,
+      updatedAt: new Date(),
+    },
   });
 }
 
@@ -238,6 +275,9 @@ module.exports = {
   setPayment,
   markCompleted,
   cancel,
+  cancelForCourier,
+  expireStaleSessions,
+  SESSION_TTL_MS,
   requireInProgress,
   joystickIdsOf,
 };

@@ -47,14 +47,63 @@ function setPhotoRamPointer(chatId, orderId) {
   sessionStore.beginAction(chatId, PHOTO_RAM_STEP, {
     _hwOrderId: orderId,
     _hwAwaitPhoto: true,
+    _hwPhotoProcessing: false,
   });
 }
 
+/** Always clear RAM photo-wait — never leave orphan hw:photo (menu trap). */
 function clearPhotoRamPointer(chatId) {
   const s = sessionStore.getSession(chatId);
-  if (s.step === PHOTO_RAM_STEP || String(s.step || "").startsWith("hw:")) {
+  if (
+    s.step === PHOTO_RAM_STEP ||
+    String(s.step || "").startsWith("hw:") ||
+    s.data?._hwAwaitPhoto ||
+    s.data?._hwPhotoProcessing ||
+    s.data?._hwOrderId
+  ) {
     sessionStore.clearSession(chatId);
   }
+}
+
+/** Hard exit wizard: DB cancel + RAM clear + main menu. */
+async function abortWizard(bot, chatId, courier, orderId = null, reason = "CANCEL") {
+  logger.info("Handover wizard abort", {
+    context: "HandoverWizard",
+    courierId: courier?.id,
+    orderId,
+    reason,
+    chatId,
+  });
+  try {
+    if (orderId != null) {
+      await deliverySessionService.cancel(orderId);
+    } else if (courier?.id) {
+      await deliverySessionService.cancelForCourier(courier.id);
+    }
+  } catch (err) {
+    logger.warn("DeliverySession cancel failed", { error: err.message, orderId });
+  }
+  clearPhotoRamPointer(chatId);
+  await bot.sendMessage(
+    chatId,
+    `❌ Topshirish wizard bekor qilindi${orderId ? ` (#${orderId})` : ""}.\n` +
+      `Kuryer menyusiga qaytdingiz.`,
+    courierKeyboards.mainMenuKeyboard()
+  );
+}
+
+function isCourierMenuText(text) {
+  const t = String(text || "").trim();
+  return [
+    "📦 Buyurtmalar",
+    "✅ Faol buyurtmalar",
+    "📜 Tarix",
+    "👤 Profil",
+    "⚙️ Sozlamalar",
+    "❌ Bekor qilish",
+    "/cancel",
+    "/menu",
+  ].includes(t);
 }
 
 async function clearKb(bot, query) {
@@ -213,7 +262,9 @@ async function askPhoto(bot, chatId, orderId) {
     chatId,
     `📸 Mijoz va ijara shartnomasi birga tushgan suratni yuboring.\n\n` +
       `Majburiy. Faqat bitta rasm.\n` +
-      `(PlayStation / joystick / kabel rasmi KERAK EMAS)`
+      `(PlayStation / joystick / kabel rasmi KERAK EMAS)\n\n` +
+      `Menyu tugmalari yoki «Bekor qilish» — wizardni yopadi.`,
+    courierKeyboards.handoverWizardCancelKeyboard(orderId)
   );
 }
 
@@ -265,6 +316,12 @@ async function handleHwCallback(bot, query, courier, parts, chatId) {
   const orderId = Number(parts[3]);
   if (!Number.isFinite(orderId)) {
     await bot.sendMessage(chatId, "Noto'g'ri");
+    return true;
+  }
+
+  if (action === "cancel") {
+    await clearKb(bot, query);
+    await abortWizard(bot, chatId, courier, orderId, "USER_CANCEL");
     return true;
   }
 
@@ -431,31 +488,77 @@ async function handleHandoverCallback(bot, query, courier, parts, chatId) {
 
 /**
  * PHOTO bosqichida rasm — state DeliverySession dan o'qiladi.
+ *
+ * Lifecycle rules:
+ * - On SUCCESS: clear RAM + DB session completed (by completeHandover)
+ * - On TX/business ERROR: keep DB at PHOTO, restore RAM await, allow retry
+ * - On ghost (RAM photo but no DB PHOTO): ALWAYS clear RAM (never trap menu)
+ * - If order already ACTIVE: treat as success cleanup, exit photo mode
  */
 async function handlePhotoMessage(bot, msg, courier) {
   const chatId = msg.chat.id;
 
+  try {
+    await deliverySessionService.expireStaleSessions();
+  } catch (_) {}
+
   const ram = sessionStore.getSession(chatId);
   if (ram.data?._hwPhotoProcessing) {
+    logger.info("Handover photo ignored — already processing", {
+      chatId,
+      courierId: courier.id,
+      orderId: ram.data?._hwOrderId,
+    });
     return true;
   }
 
-  // Prefer DB session (survives RAM clear / restart)
   let session = await deliverySessionService.getPhotoSessionForCourier(courier.id);
   if (!session && ram.step === PHOTO_RAM_STEP && ram.data?._hwOrderId) {
     session = await deliverySessionService.getByOrderId(ram.data._hwOrderId);
   }
 
+  logger.info("Handover photo received", {
+    context: "HandoverWizard",
+    chatId,
+    courierId: courier.id,
+    ramStep: ram.step,
+    waitingPhoto: Boolean(ram.data?._hwAwaitPhoto),
+    dbSessionId: session?.id,
+    dbStep: session?.currentStep,
+    dbStatus: session?.status,
+    orderId: session?.orderId || ram.data?._hwOrderId,
+    updateType: msg.photo ? "photo" : msg.document ? "document" : "other",
+  });
+
+  // Ghost / expired / already completed — NEVER keep RAM photo-wait
   if (
     !session ||
     session.status !== "IN_PROGRESS" ||
     session.currentStep !== DeliveryStep.PHOTO
   ) {
+    const orderIdHint = session?.orderId || ram.data?._hwOrderId;
+    if (orderIdHint) {
+      const order = await orderService.getOrderById(orderIdHint).catch(() => null);
+      if (order && ["ACTIVE", "DELIVERED"].includes(order.status)) {
+        clearPhotoRamPointer(chatId);
+        await bot.sendMessage(
+          chatId,
+          `✅ Buyurtma #${orderIdHint} allaqachon topshirilgan (${order.status}).\n` +
+            `Kuryer menyusiga qaytdingiz.`,
+          courierKeyboards.mainMenuKeyboard()
+        );
+        return true;
+      }
+    }
+
     if (ram.step === PHOTO_RAM_STEP || String(ram.step || "").startsWith("hw:")) {
+      clearPhotoRamPointer(chatId);
       await bot.sendMessage(
         chatId,
         "❗️ Topshirish sessiyasi topilmadi yoki muddati o'tgan.\n" +
-          "Iltimos, buyurtmada «📍 Yetib keldim» ni qayta bosing va wizardni yakunlang."
+          "Photo-kutish rejimi yopildi.\n" +
+          "Kerak bo'lsa «📍 Yetib keldim» / «Yetkazildi» orqali qayta boshlang.",
+        courierKeyboards.mainMenuKeyboard()
       );
       return true;
     }
@@ -464,14 +567,21 @@ async function handlePhotoMessage(bot, msg, courier) {
 
   const fileId = orderPhotoService.extractLargestPhotoFileId(msg);
   if (!fileId) {
-    await bot.sendMessage(chatId, "❌ Iltimos faqat rasm yuboring.");
+    await bot.sendMessage(
+      chatId,
+      "❌ Iltimos faqat rasm yuboring (yoki rasm-hujjat).\n" +
+        "Menyu / Bekor — wizardni yopadi.",
+      courierKeyboards.handoverWizardCancelKeyboard(session.orderId)
+    );
     return true;
   }
 
   if (!hasAccessoryKit(session) || !session.documentType || !session.paymentMethod) {
+    clearPhotoRamPointer(chatId);
     await bot.sendMessage(
       chatId,
-      "❗️ Wizard ma'lumotlari to'liq emas. «📍 Yetib keldim» orqali qaytadan boshlang."
+      "❗️ Wizard ma'lumotlari to'liq emas. «📍 Yetib keldim» orqali qaytadan boshlang.",
+      courierKeyboards.mainMenuKeyboard()
     );
     return true;
   }
@@ -486,6 +596,14 @@ async function handlePhotoMessage(bot, msg, courier) {
   sessionStore.updateData(chatId, { _hwPhotoProcessing: true, _hwAwaitPhoto: false });
 
   try {
+    logger.info("Handover TX starting", {
+      context: "HandoverWizard",
+      orderId,
+      courierId: courier.id,
+      sessionId: session.id,
+      fileId: String(fileId).slice(0, 24),
+    });
+
     await bot.sendMessage(chatId, "⏳ Shartnoma yaratilmoqda va topshirish yakunlanmoqda...");
 
     const updated = await deliveryHandoverService.completeHandover({
@@ -499,6 +617,12 @@ async function handlePhotoMessage(bot, msg, courier) {
       paymentMethod: session.paymentMethod,
       photoFileId: fileId,
       bot,
+    });
+
+    logger.info("Handover complete success — cleanup", {
+      context: "HandoverWizard",
+      orderId,
+      status: updated.status,
     });
 
     clearPhotoRamPointer(chatId);
@@ -515,18 +639,103 @@ async function handlePhotoMessage(bot, msg, courier) {
         `Status: ${updated.status}`,
       {
         parse_mode: "HTML",
-        reply_markup: courierKeyboards.activeRentalKeyboard(orderId, remaining).reply_markup,
+        ...courierKeyboards.mainMenuKeyboard(),
       }
     );
+    await bot.sendMessage(
+      chatId,
+      `📦 Faol buyurtma:`,
+      courierKeyboards.activeRentalKeyboard(orderId, remaining)
+    );
   } catch (err) {
-    sessionStore.updateData(chatId, { _hwPhotoProcessing: false, _hwAwaitPhoto: true });
-    const text = err instanceof DeliveryHandoverError ? err.message : "Xatolik";
-    logger.error("Handover complete failed", { error: err.message, stack: err.stack });
-    await bot.sendMessage(chatId, `❗️ ${text}\n\nRasmni qayta yuborishingiz mumkin.`);
+    // Keep DB PHOTO step for retry — never destroy session on soft failure
+    const text = err instanceof DeliveryHandoverError ? err.message : err.message || "Xatolik";
+    logger.error("Handover complete failed — keeping PHOTO step", {
+      context: "HandoverWizard",
+      orderId,
+      courierId: courier.id,
+      error: err.message,
+      stack: err.stack,
+    });
+
+    // If order already delivered by a racing success, exit cleanly
+    const order = await orderService.getOrderById(orderId).catch(() => null);
+    if (order && ["ACTIVE", "DELIVERED"].includes(order.status)) {
+      clearPhotoRamPointer(chatId);
+      try {
+        await deliverySessionService.markCompleted(orderId);
+      } catch (_) {}
+      await bot.sendMessage(
+        chatId,
+        `✅ Buyurtma #${orderId} allaqachon topshirilgan.\nKuryer menyusiga qaytdingiz.`,
+        courierKeyboards.mainMenuKeyboard()
+      );
+      return true;
+    }
+
+    setPhotoRamPointer(chatId, orderId);
+    await bot.sendMessage(
+      chatId,
+      `❗️ ${text}\n\n` +
+        `Wizard saqlangan — rasmni qayta yuboring.\n` +
+        `Yoki «Bekor qilish» / menyu tugmasi bilan chiqing.`,
+      courierKeyboards.handoverWizardCancelKeyboard(orderId)
+    );
   } finally {
     handoverLocks.delete(lockKey);
+    const s = sessionStore.getSession(chatId);
+    if (s.data?._hwPhotoProcessing) {
+      sessionStore.updateData(chatId, { _hwPhotoProcessing: false });
+    }
   }
   return true;
+}
+
+/**
+ * Escape photo-wait trap.
+ * - /cancel or "Bekor qilish" → full abort message, consumed (return 'aborted')
+ * - Menu buttons → silent cleanup, fall through (return 'cleared')
+ * - Not in photo mode → 'noop'
+ */
+async function handleAbortText(bot, msg, courier) {
+  const text = (msg.text || "").trim();
+  const isCancel = /^\/cancel\b/i.test(text) || text === "❌ Bekor qilish";
+  const isMenu = isCourierMenuText(text);
+  if (!isCancel && !isMenu) return "noop";
+
+  const chatId = msg.chat.id;
+  const ram = sessionStore.getSession(chatId);
+  const photoSession = await deliverySessionService
+    .getPhotoSessionForCourier(courier.id)
+    .catch(() => null);
+  const inHw =
+    ram.step === PHOTO_RAM_STEP ||
+    Boolean(ram.data?._hwAwaitPhoto) ||
+    Boolean(photoSession) ||
+    String(ram.step || "").startsWith("hw:");
+
+  if (!inHw) return "noop";
+
+  const orderId = photoSession?.orderId || ram.data?._hwOrderId || null;
+
+  if (isCancel) {
+    await abortWizard(bot, chatId, courier, orderId, "USER_CANCEL_TEXT");
+    return "aborted";
+  }
+
+  // Menu: clear trap silently, then let menu handler run
+  logger.info("Handover photo-wait cleared for menu", {
+    chatId,
+    courierId: courier.id,
+    orderId,
+    text,
+  });
+  try {
+    if (orderId != null) await deliverySessionService.cancel(orderId);
+    else if (courier?.id) await deliverySessionService.cancelForCourier(courier.id);
+  } catch (_) {}
+  clearPhotoRamPointer(chatId);
+  return "cleared";
 }
 
 module.exports = {
@@ -534,4 +743,8 @@ module.exports = {
   startHandoverWizard,
   handleCallback,
   handlePhotoMessage,
+  handleAbortText,
+  abortWizard,
+  clearPhotoRamPointer,
+  isCourierMenuText,
 };
