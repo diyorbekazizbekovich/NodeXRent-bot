@@ -6,6 +6,7 @@ const { EventEmitter } = require("events");
 const logger = require("../utils/logger");
 
 const DomainEvents = Object.freeze({
+  ORDER_HANDOVER_COMPLETED: "ORDER_HANDOVER_COMPLETED",
   ORDER_PICKED_UP: "ORDER_PICKED_UP",
   ORDER_INSPECTION_STARTED: "ORDER_INSPECTION_STARTED",
   ORDER_INSPECTION_COMPLETED: "ORDER_INSPECTION_COMPLETED",

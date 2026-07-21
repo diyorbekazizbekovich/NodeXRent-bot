@@ -372,6 +372,24 @@ async function completeHandover({
     });
   }
 
+  // Official Audit Channel — post-commit, never blocks handover
+  try {
+    const { DomainEvents, emitAfterCommit } = require("../events/domainBus");
+    emitAfterCommit(DomainEvents.ORDER_HANDOVER_COMPLETED, {
+      orderId: result.orderId,
+      meta: {
+        ...result,
+        photoFileId,
+        contractNumber: contract?.contractNumber || null,
+      },
+    });
+  } catch (err) {
+    logger.warn("Audit channel emit failed", {
+      orderId: result.orderId,
+      error: err.message,
+    });
+  }
+
   try {
     const deliverySessionService = require("./deliverySession.service");
     await deliverySessionService.markCompleted(result.orderId);
@@ -611,6 +629,7 @@ async function completeReturn({
   emitAfterCommit(DomainEvents.ORDER_PICKED_UP, {
     orderId: result.id,
     courierId: Number(courierId),
+    photoFileId: photoFileId || null,
   });
 
   return prisma.order.findUnique({

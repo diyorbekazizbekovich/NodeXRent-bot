@@ -19,6 +19,11 @@ const env = {
   ADMIN_TELEGRAM_IDS: parseIds(process.env.ADMIN_TELEGRAM_IDS),
   /** Factory Reset va eng xavfli amallar — bo'sh bo'lsa faqat birinchi ADMIN_TELEGRAM_IDS */
   SUPER_ADMIN_TELEGRAM_IDS: parseIds(process.env.SUPER_ADMIN_TELEGRAM_IDS),
+  /**
+   * Yopiq Audit Channel (numeric chat id, e.g. -100…).
+   * Hech qachon public invite link ishlatilmasin.
+   */
+  AUDIT_CHANNEL_ID: String(process.env.AUDIT_CHANNEL_ID || "").trim() || null,
   RETURN_REMINDER_HOURS_BEFORE: Number(process.env.RETURN_REMINDER_HOURS_BEFORE) || 2,
   COURIER_RESPONSE_TIMEOUT_MINUTES: Number(process.env.COURIER_RESPONSE_TIMEOUT_MINUTES) || 10,
   /** Buyurtma boshlanishidan oldin tasdiqlash oynasi (soat) */
@@ -44,6 +49,9 @@ if (env.NODE_ENV === "production") {
   }
   if (!env.ADMIN_TELEGRAM_IDS.length) {
     console.warn("[env] OGOHLANTIRISH: ADMIN_TELEGRAM_IDS bo'sh — admin panel ishlamasligi mumkin");
+  }
+  if (!env.AUDIT_CHANNEL_ID) {
+    console.warn("[env] OGOHLANTIRISH: AUDIT_CHANNEL_ID bo'sh — Audit Channel postlar yuborilmaydi");
   }
 }
 

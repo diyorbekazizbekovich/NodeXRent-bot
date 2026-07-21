@@ -51,6 +51,7 @@ function createBot() {
 
   // Domain event handlers (post-commit side effects)
   require("../events/handlers/orderPickedUp.handler").registerOrderPickedUpHandler();
+  require("../events/handlers/auditChannel.handler").registerAuditChannelHandlers();
 
   // Handlerlar callbacklarni queue ga qo'shadi (bot.on emas)
   userHandlers.register(bot);

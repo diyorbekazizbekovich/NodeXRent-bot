@@ -331,6 +331,29 @@ model AdminAuditLog {
   @@map("admin_audit_logs")
 }
 
+/// Official company Audit Channel posts (Telegram). Never delete channel messages.
+model ChannelAuditLog {
+  id                Int       @id @default(autoincrement())
+  eventType         String
+  orderId           Int?
+  courierId         Int?
+  adminId           Int?
+  customerId        Int?
+  telegramMessageId BigInt?
+  photoMessageId    BigInt?
+  status            String    @default("PENDING")
+  payload           Json?
+  error             String?
+  retryCount        Int       @default(0)
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+
+  @@index([eventType, createdAt])
+  @@index([orderId])
+  @@index([status, createdAt])
+  @@map("audit_logs")
+}
+
 model DatabaseBackup {
   id               Int      @id @default(autoincrement())
   filename         String

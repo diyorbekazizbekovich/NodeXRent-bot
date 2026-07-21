@@ -528,7 +528,10 @@ async function completeAdminInspection(orderId, {
   const { DomainEvents, emitAfterCommit } = require("../events/domainBus");
   emitAfterCommit(DomainEvents.ORDER_INSPECTION_COMPLETED, {
     orderId: order.id,
-    outcome: damaged ? "MAINTENANCE" : "AVAILABLE",
+    outcome: damaged ? "damaged" : "ok",
+    note: note || null,
+    adminId: adminContext.adminId || null,
+    fineAmount: 0,
   });
 
   return result;
