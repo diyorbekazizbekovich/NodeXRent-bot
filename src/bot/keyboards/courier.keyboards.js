@@ -169,18 +169,27 @@ function returnPickupKeyboard(orderId) {
   };
 }
 
-/** After pickup — waiting for admin */
+/** After pickup — waiting for admin inspection */
 function pickedUpKeyboard(orderId) {
   return {
     reply_markup: {
       inline_keyboard: [
+        [{ text: "📋 Batafsil ma'lumot", callback_data: `courier:inspectStatus:${orderId}` }],
+        [{ text: "🔔 Adminni eslatish", callback_data: `courier:inspectRemind:${orderId}` }],
         [{ text: "📋 Buyurtma tafsiloti", callback_data: `courier:detail:${orderId}` }],
-        [
-          {
-            text: "🔍 Admin tekshiruvi kutilmoqda",
-            callback_data: `courier:detail:${orderId}`,
-          },
-        ],
+      ],
+    },
+  };
+}
+
+/** Status panel under inspection wait */
+function inspectionWaitKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔔 Adminni eslatish", callback_data: `courier:inspectRemind:${orderId}` }],
+        [{ text: "📋 Batafsil ma'lumot", callback_data: `courier:detail:${orderId}` }],
+        [{ text: "⬅️ Orqaga", callback_data: `courier:inspectBack:${orderId}` }],
       ],
     },
   };
@@ -259,6 +268,7 @@ module.exports = {
   activeOrderDetailKeyboard,
   returnPickupKeyboard,
   pickedUpKeyboard,
+  inspectionWaitKeyboard,
   locationUpdateKeyboard,
   handoverCollateralKeyboard,
   handoverNoneConfirmKeyboard,

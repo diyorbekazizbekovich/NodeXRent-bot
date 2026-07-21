@@ -445,6 +445,8 @@ model Order {
   expectedReturnAt    DateTime?
   /// Courier physically collected console from customer
   pickedUpAt          DateTime?
+  /// Last time inspection reminder was sent to admins (spam throttle)
+  lastInspectionReminderAt DateTime?
   assignedByAdmin Boolean    @default(false)
 
   /// Admin/kuryer tasdiqlagan vaqt (confirm window ichida)

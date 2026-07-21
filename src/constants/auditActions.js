@@ -25,6 +25,7 @@ const AuditAction = Object.freeze({
   USER_UNBLOCKED: "USER_UNBLOCKED",
   ADMIN_LOGIN: "ADMIN_LOGIN",
   BACKUP_RESTORED: "BACKUP_RESTORED",
+  INSPECTION_REMINDER_SENT: "INSPECTION_REMINDER_SENT",
 });
 
 /** @type {Record<string, { icon: string, title: string }>} */
@@ -52,6 +53,7 @@ const AUDIT_ACTION_META = Object.freeze({
   [AuditAction.USER_BLOCKED]: { icon: "🔒", title: "Foydalanuvchi bloklandi" },
   [AuditAction.USER_UNBLOCKED]: { icon: "🔓", title: "Blokdan chiqarildi" },
   [AuditAction.ADMIN_LOGIN]: { icon: "👤", title: "Admin login" },
+  [AuditAction.INSPECTION_REMINDER_SENT]: { icon: "🔔", title: "Tekshiruv eslatmasi" },
 });
 
 function getActionMeta(action) {

@@ -6,6 +6,8 @@ const orderNotificationService = require("../../services/orderNotification.servi
 const deliveryHandoverService = require("../../services/deliveryHandover.service");
 const rentalReturnService = require("../../services/rentalReturn.service");
 const orderSummaryService = require("../../services/orderSummary/orderSummary.service");
+const inspectionReminderService = require("../../services/inspectionReminder.service");
+const { InspectionReminderError } = inspectionReminderService;
 const { notify } = require("../../services/notification.service");
 const courierKeyboards = require("../keyboards/courier.keyboards");
 const sessionStore = require("../sessionStore");
@@ -313,6 +315,8 @@ function register(bot) {
       }
       for (const o of dashboard.acceptedOrders.slice(0, 10)) {
         let kb = courierKeyboards.assignedOrderKeyboard(o.id);
+        let body = orderSummaryService.formatCourierListItem(o);
+
         if (o.status === "ON_THE_WAY") kb = courierKeyboards.onTheWayKeyboard(o.id);
         else if (o.status === "ARRIVED") kb = courierKeyboards.arrivedKeyboard(o.id);
         else if (["DELIVERED", "ACTIVE", "EXPIRED"].includes(o.status)) {
@@ -323,12 +327,15 @@ function register(bot) {
           kb = courierKeyboards.returnPickupKeyboard(o.id);
         } else if (o.status === "PICKED_UP") {
           kb = courierKeyboards.pickedUpKeyboard(o.id);
+          try {
+            const card = await inspectionReminderService.buildCourierInspectionStatusCard(o.id);
+            if (card?.text) body = card.text;
+          } catch (_) {
+            /* keep list item */
+          }
         }
 
-        // Enrich list row with customer + unit when available
-        let body = orderSummaryService.formatCourierListItem(o);
-        // Fallback if user/unit not loaded on dashboard list
-        if (!o.user && !o.inventoryUnit) {
+        if (!o.user && !o.inventoryUnit && o.status !== "PICKED_UP") {
           const rem =
             ["DELIVERED", "ACTIVE", "EXPIRED"].includes(o.status) &&
             rentalReturnService.getExpectedReturnAt(o)
@@ -337,7 +344,7 @@ function register(bot) {
           body = `#${o.id} — ${o.consoleType} — ${statusLabel(o.status)}${rem}`;
         }
 
-        // activeRentalKeyboard already has detail+ops; other states need them
+        // activeRentalKeyboard / pickedUpKeyboard already have detail actions
         const hasDetail =
           kb?.reply_markup?.inline_keyboard?.some((row) =>
             row.some((b) => String(b.callback_data || "").includes(":detail:"))
@@ -499,6 +506,48 @@ function register(bot) {
           await sendCourierOrderDetail(bot, chatId, orderId, courier);
         } else {
           await handoverWizard.startHandoverWizard(bot, chatId, orderId, courier);
+        }
+      } else if (action === "inspectStatus") {
+        const card = await inspectionReminderService.buildCourierInspectionStatusCard(orderId);
+        if (!card) {
+          await bot.sendMessage(chatId, "Buyurtma topilmadi.");
+          return true;
+        }
+        if (!(await assertCourierOwnsOrder(card.order, courier, chatId, bot))) {
+          return true;
+        }
+        await bot.sendMessage(chatId, card.text, {
+          parse_mode: "HTML",
+          ...courierKeyboards.inspectionWaitKeyboard(orderId),
+        });
+      } else if (action === "inspectBack") {
+        await bot.sendMessage(
+          chatId,
+          `📦 Buyurtma #${orderId} — admin tekshiruvi kutilmoqda.`,
+          courierKeyboards.pickedUpKeyboard(orderId)
+        );
+      } else if (action === "inspectRemind") {
+        try {
+          const order = await inspectionReminderService.loadOrder(orderId);
+          if (!(await assertCourierOwnsOrder(order, courier, chatId, bot))) {
+            return true;
+          }
+          await inspectionReminderService.sendInspectionReminder(orderId, {
+            kind: "reminder",
+            skipCooldown: false,
+            actorType: "courier",
+            actorId: courier.id,
+          });
+          await bot.sendMessage(
+            chatId,
+            `✅ Tekshiruv eslatmasi adminlarga qayta yuborildi.\n📦 Buyurtma #${orderId}`
+          );
+        } catch (err) {
+          if (err instanceof InspectionReminderError) {
+            await bot.sendMessage(chatId, err.message);
+          } else {
+            throw err;
+          }
         }
       } else if (action === "detail" || action === "rentalInfo") {
         await sendCourierOrderDetail(bot, chatId, orderId, courier);

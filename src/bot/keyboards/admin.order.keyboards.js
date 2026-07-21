@@ -76,11 +76,11 @@ function pickedUpInspectionKeyboard(orderId) {
       inline_keyboard: [
         [
           {
-            text: "✅ Start Inspection",
+            text: "✅ Tekshiruvni boshlash",
             callback_data: `admin:order:startInspect:${orderId}`,
           },
         ],
-        [{ text: "📋 Full Details", callback_data: `admin:order:details:${orderId}` }],
+        [{ text: "📋 Batafsil ma'lumot", callback_data: `admin:order:details:${orderId}` }],
       ],
     },
   };
