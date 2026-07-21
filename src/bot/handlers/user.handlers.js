@@ -7,6 +7,7 @@ const sessionStore = require("../sessionStore");
 const logger = require("../../utils/logger");
 const rentalExtensionService = require("../../services/rentalExtension.service");
 const rentalReturnService = require("../../services/rentalReturn.service");
+const earlyReturnWizard = require("../scenes/earlyReturnWizard");
 const { safeAnswerCallbackQuery } = require("../helpers/callbackHelper");
 const userOrderHistoryService = require("../../services/userOrderHistory.service");
 const { ACTIVE_RENTAL_STATUSES, LOCATION_UPDATABLE_STATUSES, OrderStatus } = require("../../constants/orderStatus");
@@ -32,6 +33,7 @@ const USER_CALLBACK_PREFIXES = [
   "promo:",
   "extend:",
   "return:",
+  "er:",
   "order:",
   "rate:",
 ];
@@ -99,6 +101,8 @@ function register(bot) {
       await handleUserSupportMessage(bot, msg);
       return;
     }
+    const user = await userService.getUserByTelegramId(msg.from.id).catch(() => null);
+    if (user && (await earlyReturnWizard.handleLocationMessage(bot, msg, user))) return;
     await locationUpdateHelper.handleCustomerLocation(bot, msg);
   });
 
@@ -125,6 +129,12 @@ function register(bot) {
     const session = sessionStore.getSession(chatId);
 
     if (session.step === SUPPORT_STEPS.USER_REPLY) return;
+
+    // Early return wizard text steps (custom reason / address / time)
+    {
+      const erUser = await userService.getUserByTelegramId(telegramId).catch(() => null);
+      if (erUser && (await earlyReturnWizard.handleTextMessage(bot, msg, erUser))) return;
+    }
 
     if (session.step === orderScene.STEPS.PROMO_INPUT) {
       if (/^\/skip\b/i.test(text) || text.toLowerCase() === "skip") {
@@ -421,30 +431,32 @@ function register(bot) {
         const orderId = Number(data.split(":")[2]);
         const user = await userService.getUserByTelegramId(telegramId);
         const L = resolveLang(user?.language);
+        const order = await orderService.getOrderById(orderId);
         try {
-          await rentalReturnService.requestReturn(orderId, {
-            actorType: "user",
-            actorId: user.id,
-            userId: user.id,
-          });
-          await bot.sendMessage(chatId, t("returnReady.ok", L, { id: orderId }));
+          await bot.editMessageReplyMarkup(
+            { inline_keyboard: [] },
+            { chat_id: chatId, message_id: query.message.message_id }
+          );
+        } catch (_) {}
+
+        // Early return (period not ended) → wizard; on-time → immediate RETURN_REQUESTED
+        if (order && !rentalReturnService.isRentalPeriodEnded(order)) {
+          await earlyReturnWizard.startEarlyReturnWizard(bot, chatId, orderId, user);
+        } else {
           try {
-            await bot.editMessageReplyMarkup(
-              { inline_keyboard: [] },
-              { chat_id: chatId, message_id: query.message.message_id }
-            );
-          } catch (_) {}
-        } catch (err) {
-          if (err.code === "RENTAL_NOT_ENDED") {
-            const order = await orderService.getOrderById(orderId);
-            const remaining = formatRemainingDuration(
-              rentalReturnService.getExpectedReturnAt(order || {})
-            );
-            await bot.sendMessage(chatId, t("returnReady.tooEarly", L, { remaining }));
-          } else {
+            await rentalReturnService.requestReturn(orderId, {
+              actorType: "user",
+              actorId: user.id,
+              userId: user.id,
+            });
+            await bot.sendMessage(chatId, t("returnReady.ok", L, { id: orderId }));
+          } catch (err) {
             await bot.sendMessage(chatId, t("returnReady.fail", L, { error: err.message }));
           }
         }
+      } else if (data.startsWith("er:")) {
+        const user = await userService.getUserByTelegramId(telegramId);
+        await earlyReturnWizard.handleCallback(bot, query, user, data);
       } else if (data.startsWith("extend:req:")) {
         const [, , orderIdRaw, hoursRaw] = data.split(":");
         const user = await userService.getUserByTelegramId(telegramId);

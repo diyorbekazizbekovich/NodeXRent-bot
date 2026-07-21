@@ -20,6 +20,10 @@ const {
 } = require("./admin.pricing.handlers");
 const { registerAdminOrderHandlers } = require("./admin.order.handlers");
 const {
+  registerAdminEarlyReturnHandlers,
+  handleAdminEarlyReturnMessage,
+} = require("./admin.earlyReturn.handlers");
+const {
   registerAdminCourierHandlers,
   handleCourierAdminMessage,
   courierAdminMenuKeyboard,
@@ -86,6 +90,7 @@ async function isAdmin(telegramId) {
 function register(bot) {
   registerPricingAdmin(bot, isAdmin);
   registerAdminOrderHandlers(bot, isAdmin);
+  registerAdminEarlyReturnHandlers(bot, isAdmin);
   registerAdminCourierHandlers(bot, isAdmin);
   registerAdminCrmHandlers(bot, isAdmin);
   registerAdminSupportHandlers(bot, isAdmin);
@@ -199,6 +204,7 @@ function register(bot) {
     if (!msg.text) return;
 
     if (await handlePricingAdminMessage(bot, chatId, msg, session)) return;
+    if (await handleAdminEarlyReturnMessage(bot, chatId, msg, session)) return;
     if (await handleCourierAdminMessage(bot, chatId, msg, session)) return;
     if (await handleCrmAdminMessage(bot, chatId, msg, session)) return;
 

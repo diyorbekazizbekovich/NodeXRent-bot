@@ -102,15 +102,15 @@ function deliveredKeyboard(orderId) {
   return returnPickupKeyboard(orderId);
 }
 
-/** ACTIVE rental: countdown only — no return button */
+/** ACTIVE rental list shortcut */
 function activeRentalKeyboard(orderId, remainingText) {
   return {
     reply_markup: {
       inline_keyboard: [
         [
           {
-            text: `⏳ Ijara tugashiga: ${remainingText || "—"}`,
-            callback_data: `courier:rentalInfo:${orderId}`,
+            text: `⏳ ${remainingText || "—"} · 📋 Batafsil`,
+            callback_data: `courier:detail:${orderId}`,
           },
         ],
       ],
@@ -118,11 +118,65 @@ function activeRentalKeyboard(orderId, remainingText) {
   };
 }
 
+/**
+ * Full active-order action pad (shown under detail card).
+ * @param {object} opts
+ * @param {boolean} [opts.canStartReturn]
+ * @param {boolean} [opts.canPickUpNow]
+ * @param {string|null} [opts.mapsUrl]
+ * @param {string|null} [opts.phone]
+ * @param {string|null} [opts.telegramId]
+ */
+function activeOrderDetailKeyboard(orderId, opts = {}) {
+  const rows = [];
+
+  if (opts.phone) {
+    rows.push([
+      {
+        text: "📞 Mijozga qo'ng'iroq",
+        url: `tel:${String(opts.phone).replace(/[^\d+]/g, "")}`,
+      },
+    ]);
+  } else {
+    rows.push([{ text: "📞 Telefon yo'q", callback_data: `courier:call:${orderId}` }]);
+  }
+
+  if (opts.telegramId) {
+    rows.push([
+      { text: "💬 Telegram", url: `tg://user?id=${opts.telegramId}` },
+    ]);
+  }
+
+  if (opts.mapsUrl) {
+    rows.push([{ text: "🗺 Navigatsiya", url: opts.mapsUrl }]);
+  } else {
+    rows.push([{ text: "📍 Lokatsiya", callback_data: `courier:location:${orderId}` }]);
+  }
+
+  rows.push([{ text: "📩 Eslatma yuborish", callback_data: `courier:remind:${orderId}` }]);
+  rows.push([{ text: "↩️ Qaytarish so'rovlari", callback_data: `courier:returns:${orderId}` }]);
+  rows.push([{ text: "📜 Tarix", callback_data: `courier:history:${orderId}` }]);
+
+  if (opts.canPickUpNow || opts.canStartReturn) {
+    rows.push([
+      {
+        text: opts.canPickUpNow ? "🚚 Hozir olib ketish" : "🚚 Qaytarishni boshlash",
+        callback_data: `courier:returned:${orderId}`,
+      },
+    ]);
+  }
+
+  rows.push([{ text: "🔄 Yangilash", callback_data: `courier:detail:${orderId}` }]);
+
+  return { reply_markup: { inline_keyboard: rows } };
+}
+
 /** RETURN_REQUESTED / RETURN_ASSIGNED — courier may collect */
 function returnPickupKeyboard(orderId) {
   return {
     reply_markup: {
       inline_keyboard: [
+        [{ text: "📋 Buyurtma tafsiloti", callback_data: `courier:detail:${orderId}` }],
         [{ text: "↩️ Qaytarib olish", callback_data: `courier:returned:${orderId}` }],
       ],
     },
@@ -134,10 +188,11 @@ function pickedUpKeyboard(orderId) {
   return {
     reply_markup: {
       inline_keyboard: [
+        [{ text: "📋 Buyurtma tafsiloti", callback_data: `courier:detail:${orderId}` }],
         [
           {
             text: "🔍 Admin tekshiruvi kutilmoqda",
-            callback_data: `courier:rentalInfo:${orderId}`,
+            callback_data: `courier:detail:${orderId}`,
           },
         ],
       ],
@@ -215,6 +270,7 @@ module.exports = {
   arrivedKeyboard,
   deliveredKeyboard,
   activeRentalKeyboard,
+  activeOrderDetailKeyboard,
   returnPickupKeyboard,
   pickedUpKeyboard,
   locationUpdateKeyboard,

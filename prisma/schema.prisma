@@ -129,6 +129,25 @@ enum NotificationType {
   ORDER_CONFIRM_READY
   ORDER_PRIORITY_REMINDER
   ORDER_START_REMINDER
+  EARLY_RETURN_REQUEST
+  EARLY_RETURN_APPROVED
+  EARLY_RETURN_REJECTED
+}
+
+/// Early return request — independent of Order status until admin approves.
+enum ReturnRequestStatus {
+  PENDING_ADMIN
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum EarlyReturnReason {
+  WORK_DONE
+  TRAVEL
+  AWAY_FROM_HOME
+  NO_LONGER_NEEDED
+  OTHER
 }
 
 model User {
@@ -150,6 +169,7 @@ model User {
   orders           Order[]
   reviews          Review[]
   supportThread    SupportThread?
+  returnRequests   ReturnRequest[]
 
   @@index([lastActivityAt])
   @@map("users")
@@ -472,6 +492,7 @@ model Order {
   reminderLogs     OrderReminderLog[]
   courierRejections OrderCourierRejection[]
   deliverySession  DeliverySession?
+  returnRequests   ReturnRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -482,6 +503,36 @@ model Order {
   @@index([paymentReceived])
   @@index([isHighPriority])
   @@map("orders")
+}
+
+/// Customer early-return request. Does NOT change Order/Inventory until admin approves.
+model ReturnRequest {
+  id                   Int                 @id @default(autoincrement())
+  orderId              Int
+  order                Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId           Int
+  customer             User                @relation(fields: [customerId], references: [id])
+  reason               EarlyReturnReason
+  customReason         String?
+  pickupAddress        String
+  pickupLatitude       Float?
+  pickupLongitude      Float?
+  requestedPickupTime  DateTime
+  /// Snapshot of remaining rental time at request (human-readable)
+  remainingRentalTime  String?
+  status               ReturnRequestStatus @default(PENDING_ADMIN)
+  adminNote            String?
+  approvedAt           DateTime?
+  approvedByAdminId    Int?
+  approvedByAdmin      Admin?              @relation(fields: [approvedByAdminId], references: [id])
+  rejectedAt           DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([orderId, status])
+  @@index([customerId, status])
+  @@index([status, createdAt])
+  @@map("return_requests")
 }
 
 /// Idempotent reminder audit — server restart da qayta yuborilmasin
@@ -680,6 +731,7 @@ model Admin {
   createdAt  DateTime @default(now())
   campaigns  AdCampaign[]
   supportMessages SupportMessage[]
+  approvedReturnRequests ReturnRequest[]
 
   @@map("admins")
 }
