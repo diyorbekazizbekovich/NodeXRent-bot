@@ -59,10 +59,43 @@ function returnActionsKeyboard(orderId) {
       inline_keyboard: [
         [{ text: "↩️ Qaytarish so'rovi (force)", callback_data: `admin:order:returnReq:${orderId}` }],
         [{ text: "🚚 Qaytarish kuryeri", callback_data: `admin:order:returnAssign:${orderId}` }],
+        [{ text: "✅ Tekshiruvni boshlash", callback_data: `admin:order:startInspect:${orderId}` }],
         [
-          { text: "✅ Tekshiruv OK", callback_data: `admin:order:inspectOk:${orderId}` },
-          { text: "🛠 Nosoz", callback_data: `admin:order:inspectBad:${orderId}` },
+          { text: "✅ Yaxshi holat", callback_data: `admin:order:inspectOk:${orderId}` },
+          { text: "🔧 Ta'mir kerak", callback_data: `admin:order:inspectBad:${orderId}` },
         ],
+      ],
+    },
+  };
+}
+
+/** Shown on post-pickup admin alert */
+function pickedUpInspectionKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "✅ Start Inspection",
+            callback_data: `admin:order:startInspect:${orderId}`,
+          },
+        ],
+        [{ text: "📋 Full Details", callback_data: `admin:order:details:${orderId}` }],
+      ],
+    },
+  };
+}
+
+/** After inspection started (unit INSPECTION) */
+function inspectionDecisionKeyboard(orderId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ Good Condition", callback_data: `admin:order:inspectOk:${orderId}` },
+          { text: "🔧 Needs Repair", callback_data: `admin:order:inspectBad:${orderId}` },
+        ],
+        [{ text: "📋 Full Details", callback_data: `admin:order:details:${orderId}` }],
       ],
     },
   };
@@ -73,4 +106,6 @@ module.exports = {
   courierPickKeyboard,
   returnCourierPickKeyboard,
   returnActionsKeyboard,
+  pickedUpInspectionKeyboard,
+  inspectionDecisionKeyboard,
 };

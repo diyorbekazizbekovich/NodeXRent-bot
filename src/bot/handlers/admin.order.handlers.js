@@ -21,6 +21,7 @@ const HANDLED_ACTIONS = new Set([
   "returnReq",
   "returnAssign",
   "returnAssignTo",
+  "startInspect",
   "inspectOk",
   "inspectBad",
   "returnMenu",
@@ -127,6 +128,23 @@ function registerAdminOrderHandlers(bot, isAdmin) {
         const courierId = Number(parts[4]);
         await rentalReturnService.assignReturnCourier(orderId, courierId, adminContext);
         await bot.sendMessage(chatId, `✅ #${orderId} — RETURN_ASSIGNED (kuryer #${courierId}).`);
+      } else if (action === "startInspect") {
+        const orderId = Number(parts[3]);
+        const updated = await rentalReturnService.startAdminInspection(orderId, {
+          adminContext,
+          note: "Admin Start Inspection",
+        });
+        const unitStatus = updated.inventoryUnit?.status || "INSPECTION";
+        await bot.sendMessage(
+          chatId,
+          `🔍 Tekshiruv boshlandi (#${orderId})\n` +
+            `Inventar: <b>${unitStatus}</b> (UNDER_INSPECTION)\n` +
+            `Buyurtma: PICKED_UP\n\nHolatni tanlang:`,
+          {
+            parse_mode: "HTML",
+            ...adminOrderKeyboards.inspectionDecisionKeyboard(orderId),
+          }
+        );
       } else if (action === "inspectOk" || action === "inspectBad") {
         const orderId = Number(parts[3]);
         const outcome = action === "inspectOk" ? "ok" : "damaged";
@@ -139,7 +157,7 @@ function registerAdminOrderHandlers(bot, isAdmin) {
           chatId,
           outcome === "ok"
             ? `✅ #${orderId} COMPLETED — inventar AVAILABLE`
-            : `🛠 #${orderId} COMPLETED — inventar MAINTENANCE`
+            : `🔧 #${orderId} COMPLETED — inventar MAINTENANCE (UNDER_REPAIR)`
         );
       } else if (action === "assign") {
         const orderId = Number(parts[3]);
@@ -153,7 +171,20 @@ function registerAdminOrderHandlers(bot, isAdmin) {
       }
     } catch (err) {
       const expected = err instanceof OrderAssignmentError || err instanceof RentalReturnError;
-      await bot.sendMessage(chatId, (expected ? err.message : "Xatolik").slice(0, 200));
+      const logger = require("../../utils/logger");
+      logger[expected ? "warn" : "error"]("Admin order callback failed", {
+        context: "AdminOrderHandlers",
+        data: query.data,
+        error: err.message,
+        stack: err.stack,
+        code: expected ? err.code : undefined,
+      });
+      await bot.sendMessage(
+        chatId,
+        expected
+          ? String(err.message).slice(0, 200)
+          : `❗️ Xatolik: ${String(err.message || "unknown").slice(0, 150)}`
+      );
     }
     return true;
   });

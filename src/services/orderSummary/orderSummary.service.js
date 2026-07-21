@@ -14,11 +14,16 @@ const { buildPaymentSummary, formatPaymentSection } = require("./paymentSummary.
 const { buildInventorySummary, formatInventorySection } = require("./inventorySummary.service");
 const { buildReturnSummary, formatReturnSection } = require("./returnSummary.service");
 const { formatTimelineSection } = require("./timeline.service");
+const { formatCourierOpsCard } = require("./opsSummary.service");
 
 const DETAIL_INCLUDE = {
   user: true,
   courier: true,
-  inventoryUnit: true,
+  inventoryUnit: {
+    include: {
+      history: { orderBy: { createdAt: "desc" }, take: 20 },
+    },
+  },
   consoleItem: true,
   hdmiItem: true,
   powerItem: true,
@@ -155,7 +160,9 @@ function formatCourierOrderCard(summary) {
         ? `#${escapeHtml(summary.contractNumber)}`
         : "—"
     }\n` +
-    `📸 Surat: ${summary.hasHandoverPhoto ? "Bor" : "Yo'q"}`
+    `📸 Surat: ${summary.hasHandoverPhoto ? "Bor" : "Yo'q"}\n` +
+    `\n━━━━━━━━━━━━━━\n\n` +
+    formatTimelineSection(o)
   );
 }
 
@@ -184,6 +191,7 @@ module.exports = {
   buildOrderSummary,
   formatCourierOrderCard,
   formatCourierListItem,
+  formatCourierOpsCard,
   formatPaymentSection,
   formatInventorySection,
   formatReturnSection,

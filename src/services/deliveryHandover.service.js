@@ -476,6 +476,13 @@ async function completeReturn({
   photoFileId,
   bot,
 }) {
+  logger.info("RETURN_STARTED", {
+    context: "DeliveryHandover",
+    event: "RETURN_STARTED",
+    orderId,
+    courierId,
+  });
+
   if (!Object.values(CONDITIONS).includes(returnCondition)) {
     throw new DeliveryHandoverError("CONDITION", "Qurilma holati noto'g'ri");
   }
@@ -573,6 +580,14 @@ async function completeReturn({
     actorId: courierId,
   });
 
+  logger.info("RETURN_COMMITTED", {
+    context: "DeliveryHandover",
+    event: "RETURN_COMMITTED",
+    orderId: result.id,
+    courierId,
+    status: "PICKED_UP",
+  });
+
   if (bot && photoFileId) {
     try {
       const orderPhotoService = require("./orderPhoto.service");
@@ -582,28 +597,21 @@ async function completeReturn({
         telegramFileId: photoFileId,
       });
     } catch (err) {
-      logger.warn("Return photo save failed", { error: err.message });
+      logger.warn("Return photo save failed", {
+        context: "DeliveryHandover",
+        orderId,
+        error: err.message,
+        stack: err.stack,
+      });
     }
   }
 
-  try {
-    const { getAdminRecipients } = require("../utils/adminRecipients");
-    const admins = await getAdminRecipients();
-    for (const a of admins) {
-      await notify({
-        orderId: result.id,
-        type: "ORDER_RETURNED",
-        recipientType: "admin",
-        recipientId: a.telegramId,
-        message:
-          `📦 Kuryer olib keldi #${result.id}\n` +
-          `Status: PICKED_UP\n` +
-          `Admin tekshiruvi kutilmoqda (AVAILABLE / MAINTENANCE).`,
-      });
-    }
-  } catch (err) {
-    logger.warn("Pickup admin notify failed", { error: err.message });
-  }
+  // AFTER COMMIT — never notify inside the transaction
+  const { DomainEvents, emitAfterCommit } = require("../events/domainBus");
+  emitAfterCommit(DomainEvents.ORDER_PICKED_UP, {
+    orderId: result.id,
+    courierId: Number(courierId),
+  });
 
   return prisma.order.findUnique({
     where: { id: Number(orderId) },

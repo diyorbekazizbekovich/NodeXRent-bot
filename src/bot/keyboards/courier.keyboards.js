@@ -102,15 +102,16 @@ function deliveredKeyboard(orderId) {
   return returnPickupKeyboard(orderId);
 }
 
-/** ACTIVE rental list shortcut */
+/** ACTIVE rental list shortcut — two distinct actions */
 function activeRentalKeyboard(orderId, remainingText) {
   return {
     reply_markup: {
       inline_keyboard: [
+        [{ text: "📋 To'liq ma'lumot", callback_data: `courier:detail:${orderId}` }],
         [
           {
-            text: `⏳ ${remainingText || "—"} · 📋 Batafsil`,
-            callback_data: `courier:detail:${orderId}`,
+            text: `⏳ ${remainingText || "—"} · Batafsil`,
+            callback_data: `courier:ops:${orderId}`,
           },
         ],
       ],
@@ -120,34 +121,18 @@ function activeRentalKeyboard(orderId, remainingText) {
 
 /**
  * Full active-order action pad (shown under detail card).
- * @param {object} opts
- * @param {boolean} [opts.canStartReturn]
- * @param {boolean} [opts.canPickUpNow]
- * @param {string|null} [opts.mapsUrl]
- * @param {string|null} [opts.phone]
- * @param {string|null} [opts.telegramId]
+ * IMPORTANT: Telegram only allows http(s) / tg:// URL buttons.
+ * `tel:` causes BUTTON_URL_INVALID and aborts the entire sendMessage.
+ * `tg://user?id=` also fails when the user has not started the bot / privacy blocks it.
+ * Use callback_data for phone / DM actions.
  */
 function activeOrderDetailKeyboard(orderId, opts = {}) {
   const rows = [];
 
-  if (opts.phone) {
-    rows.push([
-      {
-        text: "📞 Mijozga qo'ng'iroq",
-        url: `tel:${String(opts.phone).replace(/[^\d+]/g, "")}`,
-      },
-    ]);
-  } else {
-    rows.push([{ text: "📞 Telefon yo'q", callback_data: `courier:call:${orderId}` }]);
-  }
+  rows.push([{ text: "📞 Mijozga qo'ng'iroq", callback_data: `courier:call:${orderId}` }]);
+  rows.push([{ text: "💬 Telegram", callback_data: `courier:tg:${orderId}` }]);
 
-  if (opts.telegramId) {
-    rows.push([
-      { text: "💬 Telegram", url: `tg://user?id=${opts.telegramId}` },
-    ]);
-  }
-
-  if (opts.mapsUrl) {
+  if (opts.mapsUrl && /^https?:\/\//i.test(opts.mapsUrl)) {
     rows.push([{ text: "🗺 Navigatsiya", url: opts.mapsUrl }]);
   } else {
     rows.push([{ text: "📍 Lokatsiya", callback_data: `courier:location:${orderId}` }]);
@@ -156,6 +141,7 @@ function activeOrderDetailKeyboard(orderId, opts = {}) {
   rows.push([{ text: "📩 Eslatma yuborish", callback_data: `courier:remind:${orderId}` }]);
   rows.push([{ text: "↩️ Qaytarish so'rovlari", callback_data: `courier:returns:${orderId}` }]);
   rows.push([{ text: "📜 Tarix", callback_data: `courier:history:${orderId}` }]);
+  rows.push([{ text: "⚙️ Operatsion (Batafsil)", callback_data: `courier:ops:${orderId}` }]);
 
   if (opts.canPickUpNow || opts.canStartReturn) {
     rows.push([

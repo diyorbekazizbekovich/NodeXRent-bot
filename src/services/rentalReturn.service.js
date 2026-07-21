@@ -183,8 +183,9 @@ async function requestReturn(orderId, {
         orderId: order.id,
         type: "RETURN_REMINDER",
         recipientType: "admin",
-        recipientId: a.telegramId,
-        message:
+        recipientTelegramId: String(a.telegramId),
+        recipientId: a.recipientId,
+        text:
           `↩️ Qaytarish so'rovi #${order.id}\n` +
           `Mijoz: ${order.user?.fullName || "—"}\n` +
           `Model: ${order.consoleType}\n` +
@@ -196,8 +197,9 @@ async function requestReturn(orderId, {
         orderId: order.id,
         type: "RETURN_REMINDER",
         recipientType: "courier",
-        recipientId: order.courier.telegramId,
-        message:
+        recipientTelegramId: String(order.courier.telegramId),
+        recipientId: order.courier.id,
+        text:
           `↩️ Buyurtma #${order.id} — mijoz qaytarishga tayyor.\n` +
           `Admin kuryerni tasdiqlagach olib ketishingiz mumkin.`,
       });
@@ -290,14 +292,17 @@ async function assignReturnCourier(orderId, courierId, adminContext = {}) {
       orderId: order.id,
       type: "COURIER_ASSIGNED",
       recipientType: "courier",
-      recipientId: courier.telegramId,
-      message:
+      recipientTelegramId: String(courier.telegramId),
+      recipientId: courier.id,
+      text:
         `↩️ Qaytarib olish #${order.id}\n` +
         `Manzil: ${order.address}\n` +
         `Model: ${order.consoleType}\n` +
         `Mijozdan PlayStation ni olib keling.`,
     });
-  } catch (_) {}
+  } catch (err) {
+    logger.warn("Return assign notify failed", { error: err.message, stack: err.stack });
+  }
 
   return updated;
 }
@@ -317,8 +322,79 @@ async function assertPickupAllowed(order, courierId) {
 }
 
 /**
- * Admin inspection after PICKED_UP.
- * ok → Inventory AVAILABLE; damaged → MAINTENANCE; order → COMPLETED.
+ * Admin starts inspection after PICKED_UP.
+ * InventoryUnit: RENTED → INSPECTION (UNDER_INSPECTION).
+ * Order stays PICKED_UP until decision.
+ */
+async function startAdminInspection(orderId, { adminContext = {}, note = null } = {}) {
+  const order = await prisma.order.findUnique({
+    where: { id: Number(orderId) },
+    include: { inventoryUnit: true, user: true, courier: true },
+  });
+  if (!order) throw new RentalReturnError("NOT_FOUND", "Buyurtma topilmadi");
+  if (order.status !== OrderStatus.PICKED_UP) {
+    throw new RentalReturnError(
+      "INVALID_STATUS",
+      `Tekshiruvni boshlash faqat PICKED_UP uchun: hozir ${order.status}`
+    );
+  }
+  if (!order.inventoryUnitId) {
+    throw new RentalReturnError("NO_UNIT", "Buyurtmada inventar biriktirilmagan");
+  }
+
+  const unit = order.inventoryUnit;
+  if (unit?.status === AssetStatus.INSPECTION) {
+    return order;
+  }
+  if (unit?.status !== AssetStatus.RENTED) {
+    throw new RentalReturnError(
+      "INVALID_UNIT_STATUS",
+      `Unit holati RENTED bo'lishi kerak: hozir ${unit?.status}`
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await inventoryAssetService.changeStatus(order.inventoryUnitId, AssetStatus.INSPECTION, {
+      tx,
+      orderId: order.id,
+      action: "START_INSPECTION",
+      note: note || "Admin tekshiruvni boshladi",
+      actorType: "admin",
+      actorId: adminContext.adminId,
+    });
+    await tx.orderStatusLog.create({
+      data: {
+        orderId: order.id,
+        status: OrderStatus.PICKED_UP,
+        actorType: "admin",
+        actorId: adminContext.adminId ?? null,
+        note: "Inspection started — unit INSPECTION",
+      },
+    });
+  });
+
+  await logRentalAudit({
+    action: "ADMIN_INSPECTION_STARTED",
+    orderId: order.id,
+    inventoryUnitId: order.inventoryUnitId,
+    actorType: "admin",
+    actorId: adminContext.adminId,
+    adminId: adminContext.adminId,
+    telegramId: adminContext.telegramId,
+  });
+
+  const { DomainEvents, emitAfterCommit } = require("../events/domainBus");
+  emitAfterCommit(DomainEvents.ORDER_INSPECTION_STARTED, { orderId: order.id });
+
+  return prisma.order.findUnique({
+    where: { id: order.id },
+    include: { inventoryUnit: true, user: true, courier: true },
+  });
+}
+
+/**
+ * Admin inspection decision after PICKED_UP (and preferably after startAdminInspection).
+ * ok → Inventory AVAILABLE; damaged → MAINTENANCE (UNDER_REPAIR); order → COMPLETED.
  */
 async function completeAdminInspection(orderId, {
   outcome = "ok", // ok | damaged
@@ -348,7 +424,6 @@ async function completeAdminInspection(orderId, {
   const targetAsset = damaged ? AssetStatus.MAINTENANCE : AssetStatus.AVAILABLE;
 
   const result = await prisma.$transaction(async (tx) => {
-    // InventoryUnit: RENTED → INSPECTION → AVAILABLE|MAINTENANCE
     if (order.inventoryUnitId) {
       const unit = await tx.inventoryUnit.findUnique({
         where: { id: order.inventoryUnitId },
@@ -374,26 +449,17 @@ async function completeAdminInspection(orderId, {
             actorType: "admin",
             actorId: adminContext.adminId,
           });
-        } else if (fresh && fresh.status === AssetStatus.RENTED) {
-          // Fallback if somehow still rented
-          await inventoryAssetService.changeStatus(unit.id, AssetStatus.INSPECTION, {
-            tx,
-            orderId: order.id,
-            skipTransitionCheck: false,
-            actorType: "admin",
-            actorId: adminContext.adminId,
-          });
-          await inventoryAssetService.changeStatus(unit.id, targetAsset, {
-            tx,
-            orderId: order.id,
-            actorType: "admin",
-            actorId: adminContext.adminId,
-          });
+        } else if (fresh && [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE].includes(fresh.status)) {
+          // already decided
+        } else if (fresh) {
+          throw new RentalReturnError(
+            "INVALID_UNIT_STATUS",
+            `Unit tekshiruvga tayyor emas: ${fresh.status}`
+          );
         }
       }
     }
 
-    // Free courier PlayStation device
     if (order.playstationId) {
       await tx.playstation.updateMany({
         where: {
@@ -446,11 +512,24 @@ async function completeAdminInspection(orderId, {
         orderId: order.id,
         type: "ORDER_COMPLETED",
         recipientType: "user",
-        recipientId: order.user.telegramId,
-        message: `✅ Buyurtma #${order.id} yakunlandi. Rahmat!`,
+        recipientTelegramId: String(order.user.telegramId),
+        recipientId: order.userId,
+        text: `✅ Buyurtma #${order.id} yakunlandi. Rahmat!`,
       });
     }
-  } catch (_) {}
+  } catch (err) {
+    logger.warn("Inspection complete user notify failed", {
+      orderId: order.id,
+      error: err.message,
+      stack: err.stack,
+    });
+  }
+
+  const { DomainEvents, emitAfterCommit } = require("../events/domainBus");
+  emitAfterCommit(DomainEvents.ORDER_INSPECTION_COMPLETED, {
+    orderId: order.id,
+    outcome: damaged ? "MAINTENANCE" : "AVAILABLE",
+  });
 
   return result;
 }
@@ -465,6 +544,7 @@ module.exports = {
   computeRentalWindow,
   requestReturn,
   assignReturnCourier,
+  startAdminInspection,
   completeAdminInspection,
   logRentalAudit,
   formatRemainingDuration,

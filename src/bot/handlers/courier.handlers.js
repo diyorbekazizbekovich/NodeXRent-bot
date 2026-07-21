@@ -40,28 +40,49 @@ async function sendCourierOrderDetail(bot, chatId, orderId, courier) {
   }
 
   const text = orderSummaryService.formatCourierOrderCard(summary);
-  const u = summary.order.user;
   const kb = courierKeyboards.activeOrderDetailKeyboard(orderId, {
     canStartReturn: summary.returnInfo.canStartReturn,
     canPickUpNow: summary.returnInfo.canPickUpNow,
     mapsUrl: summary.mapsUrl,
-    phone: u?.phone || null,
-    telegramId: u?.telegramId || null,
   });
 
-  // Telegram hard limit 4096
+  const payload = {
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...kb,
+  };
+
+  if (text.length > 4000) {
+    await bot.sendMessage(chatId, text.slice(0, 3900) + "\n\n…", payload);
+  } else {
+    await bot.sendMessage(chatId, text, payload);
+  }
+  return summary;
+}
+
+async function sendCourierOpsDetail(bot, chatId, orderId, courier) {
+  const summary = await orderSummaryService.getCourierOrderDetail(orderId);
+  if (!(await assertCourierOwnsOrder(summary?.order, courier, chatId, bot))) {
+    return null;
+  }
+
+  const text = orderSummaryService.formatCourierOpsCard(summary);
+  const kb = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "📋 To'liq ma'lumot", callback_data: `courier:detail:${orderId}` }],
+        [{ text: "🔄 Yangilash", callback_data: `courier:ops:${orderId}` }],
+      ],
+    },
+  };
+
   if (text.length > 4000) {
     await bot.sendMessage(chatId, text.slice(0, 3900) + "\n\n…", {
       parse_mode: "HTML",
-      disable_web_page_preview: true,
       ...kb,
     });
   } else {
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      ...kb,
-    });
+    await bot.sendMessage(chatId, text, { parse_mode: "HTML", ...kb });
   }
   return summary;
 }
@@ -316,13 +337,20 @@ function register(bot) {
           body = `#${o.id} — ${o.consoleType} — ${statusLabel(o.status)}${rem}`;
         }
 
-        // Always allow opening full card
-        const detailRow = [
-          { text: "📋 To'liq ma'lumot", callback_data: `courier:detail:${o.id}` },
-        ];
+        // activeRentalKeyboard already has detail+ops; other states need them
+        const hasDetail =
+          kb?.reply_markup?.inline_keyboard?.some((row) =>
+            row.some((b) => String(b.callback_data || "").includes(":detail:"))
+          ) || false;
+        const detailRows = hasDetail
+          ? []
+          : [
+              [{ text: "📋 To'liq ma'lumot", callback_data: `courier:detail:${o.id}` }],
+              [{ text: "⏳ Batafsil", callback_data: `courier:ops:${o.id}` }],
+            ];
         const markup = kb?.reply_markup?.inline_keyboard
-          ? { inline_keyboard: [detailRow, ...kb.reply_markup.inline_keyboard] }
-          : { inline_keyboard: [detailRow] };
+          ? { inline_keyboard: [...detailRows, ...kb.reply_markup.inline_keyboard] }
+          : { inline_keyboard: detailRows };
 
         await bot.sendMessage(chatId, body, {
           parse_mode: "HTML",
@@ -474,6 +502,8 @@ function register(bot) {
         }
       } else if (action === "detail" || action === "rentalInfo") {
         await sendCourierOrderDetail(bot, chatId, orderId, courier);
+      } else if (action === "ops") {
+        await sendCourierOpsDetail(bot, chatId, orderId, courier);
       } else if (action === "call") {
         const summary = await orderSummaryService.getCourierOrderDetail(orderId);
         if (!(await assertCourierOwnsOrder(summary?.order, courier, chatId, bot))) {
@@ -483,9 +513,30 @@ function register(bot) {
         await bot.sendMessage(
           chatId,
           phone
-            ? `📞 Mijoz: <b>${escapeHtml(summary.order.user?.fullName || "—")}</b>\n<code>${escapeHtml(phone)}</code>`
+            ? `📞 Mijoz: <b>${escapeHtml(summary.order.user?.fullName || "—")}</b>\n<code>${escapeHtml(phone)}</code>\n\nNusxa olib qo'ng'iroq qiling.`
             : "Telefon raqami mavjud emas.",
           { parse_mode: "HTML" }
+        );
+      } else if (action === "tg") {
+        const summary = await orderSummaryService.getCourierOrderDetail(orderId);
+        if (!(await assertCourierOwnsOrder(summary?.order, courier, chatId, bot))) {
+          return true;
+        }
+        const u = summary.order.user;
+        const tid = u?.telegramId != null ? String(u.telegramId) : null;
+        await bot.sendMessage(
+          chatId,
+          tid
+            ? `💬 Mijoz: <b>${escapeHtml(u?.fullName || "—")}</b>\nTelegram ID: <code>${escapeHtml(tid)}</code>\n\nBot orqali eslatma yuboring yoki ID bo'yicha toping.`
+            : "Telegram ID mavjud emas.",
+          {
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "📩 Eslatma yuborish", callback_data: `courier:remind:${orderId}` }],
+              ],
+            },
+          }
         );
       } else if (action === "remind") {
         const summary = await orderSummaryService.getCourierOrderDetail(orderId);
@@ -595,11 +646,21 @@ function register(bot) {
       const msg = expected ? err.message : "Xatolik yuz berdi";
       logger[expected ? "warn" : "error"]("Kuryer callback xatoligi", {
         context: "Bot",
+        data: query.data,
         error: err.message,
+        stack: err.stack,
         code: expected ? err.code : undefined,
+        telegramErrorCode: err.response?.statusCode || err.code,
+        telegramDescription: err.response?.body?.description,
       });
       if (expected) await clearInlineKeyboard(bot, query);
-      await bot.sendMessage(chatId, msg.slice(0, 180));
+      await bot.sendMessage(
+        chatId,
+        expected
+          ? msg.slice(0, 180)
+          : `❗️ Xatolik yuz berdi.\n<code>${escapeHtml(String(err.message || "").slice(0, 120))}</code>`,
+        { parse_mode: "HTML" }
+      );
     }
     return true;
   });

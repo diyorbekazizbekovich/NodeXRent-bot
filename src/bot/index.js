@@ -49,6 +49,9 @@ function createBot() {
   initNotificationService(bot);
   require("../utils/telegramSend").installTelegramOutboundLogging(bot);
 
+  // Domain event handlers (post-commit side effects)
+  require("../events/handlers/orderPickedUp.handler").registerOrderPickedUpHandler();
+
   // Handlerlar callbacklarni queue ga qo'shadi (bot.on emas)
   userHandlers.register(bot);
   courierHandlers.register(bot);

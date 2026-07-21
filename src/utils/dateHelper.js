@@ -58,7 +58,10 @@ function formatRemainingDuration(target, now = new Date()) {
 }
 
 function formatDatetime(date) {
-  const p = zonedParts(date);
+  if (date == null || date === "") return "—";
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "—";
+  const p = zonedParts(d);
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(p.day)}.${pad(p.month)}.${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
 }

@@ -136,9 +136,79 @@ async function persistNotification({ orderId, type, recipientType, recipientId, 
 
 /**
  * Telegram xabar yuboradi. Audit log xatosi asosiy jarayonni to'xtatmaydi.
+ *
+ * Contract:
+ *  - text (preferred) or message (legacy alias)
+ *  - recipientTelegramId (required for delivery)
+ *  - recipientId = DB admin/user/courier id for audit (NOT telegram id)
  */
-async function notify({ orderId = null, type, recipientType, recipientTelegramId, recipientId = 0, text, options }) {
-  const sent = await sendToTelegram(recipientTelegramId, text, options);
+async function notify({
+  orderId = null,
+  type,
+  recipientType,
+  recipientTelegramId,
+  recipientId = 0,
+  text,
+  message,
+  options,
+} = {}) {
+  const body = text != null ? text : message;
+  let tgId = recipientTelegramId;
+
+  // Legacy misuse: callers passed Telegram ID as recipientId and used `message`
+  if (
+    (tgId == null || tgId === "") &&
+    recipientId != null &&
+    Number(recipientId) > 1_000_000
+  ) {
+    logger.warn("notify legacy: recipientTelegramId missing — using recipientId as chat id", {
+      context: "NotificationService",
+      type,
+      recipientType,
+      recipientId,
+      orderId,
+    });
+    tgId = recipientId;
+  }
+
+  if (tgId == null || tgId === "") {
+    logger.error("notify aborted: missing recipientTelegramId", {
+      context: "NotificationService",
+      type,
+      recipientType,
+      orderId,
+      stack: new Error("missing recipientTelegramId").stack,
+    });
+    await persistNotification({
+      orderId,
+      type,
+      recipientType,
+      recipientId,
+      isSent: false,
+    });
+    return false;
+  }
+
+  if (body == null || String(body).trim() === "") {
+    logger.error("notify aborted: empty text", {
+      context: "NotificationService",
+      type,
+      recipientType,
+      orderId,
+      recipientTelegramId: String(tgId),
+      stack: new Error("empty notify text").stack,
+    });
+    await persistNotification({
+      orderId,
+      type,
+      recipientType,
+      recipientId,
+      isSent: false,
+    });
+    return false;
+  }
+
+  const sent = await sendToTelegram(tgId, body, options);
   await persistNotification({ orderId, type, recipientType, recipientId, isSent: sent });
   return sent;
 }
