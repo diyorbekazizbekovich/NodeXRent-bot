@@ -35,25 +35,29 @@ const AssetStatusAlias = Object.freeze({
 /** Strict business transitions (asset management). */
 const ALLOWED_TRANSITIONS = Object.freeze({
   [AssetStatus.AVAILABLE]: [
-    AssetStatus.RESERVED,
-    AssetStatus.MAINTENANCE, // admin: to'g'ridan-to'g'ri ta'mirga
+    AssetStatus.RENTED, // primary: courier handover by serial
+    AssetStatus.RESERVED, // legacy / emergency reserve
+    AssetStatus.MAINTENANCE, // REPAIR
     AssetStatus.DISABLED,
     AssetStatus.LOST,
   ],
   [AssetStatus.RESERVED]: [AssetStatus.RENTED, AssetStatus.AVAILABLE],
-  [AssetStatus.RENTED]: [AssetStatus.INSPECTION],
+  [AssetStatus.RENTED]: [AssetStatus.INSPECTION], // RETURN_PENDING alias → INSPECTION
   [AssetStatus.INSPECTION]: [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE],
   [AssetStatus.MAINTENANCE]: [AssetStatus.AVAILABLE, AssetStatus.DISABLED],
   [AssetStatus.DISABLED]: [AssetStatus.AVAILABLE],
   [AssetStatus.LOST]: [],
-  // Legacy recovery paths (ops only)
   [AssetStatus.MISSING_PARTS]: [AssetStatus.AVAILABLE, AssetStatus.DISABLED],
   [AssetStatus.DEFECTIVE]: [AssetStatus.AVAILABLE, AssetStatus.DISABLED],
 });
 
 const ASSIGNABLE_STATUSES = Object.freeze([AssetStatus.AVAILABLE]);
 
-const OCCUPYING_STATUSES = Object.freeze([AssetStatus.RESERVED, AssetStatus.RENTED]);
+const OCCUPYING_STATUSES = Object.freeze([
+  AssetStatus.RESERVED,
+  AssetStatus.RENTED,
+  AssetStatus.INSPECTION,
+]);
 
 /** Must never be permanently deleted while in active rental cycle */
 const NON_DELETABLE_STATUSES = Object.freeze([
@@ -72,11 +76,10 @@ const ACTIVE_POOL_STATUSES = Object.freeze([
 ]);
 
 /**
- * Order statuses that keep inventoryUnitId occupied (unique index + conflict checks).
- * ADMIN_CONFIRMED included: reservation happens at admin approve, before courier accept.
+ * Order statuses that keep a bound inventoryUnitId occupied.
+ * ADMIN_CONFIRMED omitted: new flow leaves inventoryUnitId NULL until handover.
  */
 const UNIT_OCCUPYING_ORDER_STATUSES = Object.freeze([
-  "ADMIN_CONFIRMED",
   "ACCEPTED",
   "COURIER_ASSIGNED",
   "ON_THE_WAY",
@@ -88,6 +91,13 @@ const UNIT_OCCUPYING_ORDER_STATUSES = Object.freeze([
   "PICKED_UP",
   "EXPIRED",
 ]);
+
+/** UI label for MAINTENANCE */
+function labelAssetStatus(status) {
+  if (status === AssetStatus.MAINTENANCE) return "REPAIR";
+  if (status === AssetStatus.INSPECTION) return "INSPECTION";
+  return status || "—";
+}
 
 const CONSOLE_TYPES = Object.freeze(["PS3", "PS4", "PS5"]);
 
@@ -129,4 +139,5 @@ module.exports = {
   assertTransition,
   isAssignable,
   isNonDeletable,
+  labelAssetStatus,
 };

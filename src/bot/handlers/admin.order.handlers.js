@@ -59,11 +59,11 @@ function registerAdminOrderHandlers(bot, isAdmin) {
       } else if (action === "confirm") {
         const orderId = Number(parts[3]);
         const confirmed = await orderAssignmentService.confirmOrderByAdmin(orderId, telegramId);
-        const unitCode = confirmed.inventoryUnit?.unitCode || "—";
         await bot.sendMessage(
           chatId,
           `✅ Buyurtma #${orderId} tasdiqlandi (ADMIN_CONFIRMED).\n` +
-            `🏷 Qurilma bron qilindi: <b>${unitCode}</b> (RESERVED)\n` +
+            `🎮 Model: <b>${confirmed.consoleType}</b>\n` +
+            `📌 PlayStation topshirishda Serial Number bo'yicha tanlanadi.\n` +
             `🚚 Kuryerlar navbatiga yuborildi.`,
           { parse_mode: "HTML" }
         );
@@ -157,7 +157,7 @@ function registerAdminOrderHandlers(bot, isAdmin) {
           chatId,
           outcome === "ok"
             ? `✅ #${orderId} COMPLETED — inventar AVAILABLE`
-            : `🔧 #${orderId} COMPLETED — inventar MAINTENANCE (UNDER_REPAIR)`
+            : `🔧 #${orderId} COMPLETED — inventar REPAIR (MAINTENANCE)`
         );
       } else if (action === "assign") {
         const orderId = Number(parts[3]);

@@ -124,7 +124,7 @@ function formatCourierOrderCard(summary) {
       : "") +
     `\n━━━━━━━━━━━━━━\n\n` +
     `🎮 <b>${escapeHtml(inv.unitCode)}</b>\n` +
-    `🔢 Serial: ${escapeHtml(inv.serialNumber || "—")}\n\n` +
+    `🔢 Serial: <code>${escapeHtml(inv.serialNumber || "—")}</code>\n\n` +
     `🎮 Joystick:\n${jsLines}\n\n` +
     `📺 HDMI: ${
       inv.hdmi.length ? inv.hdmi.map((h) => escapeHtml(h.code)).join(", ") : "—"
@@ -168,12 +168,14 @@ function formatCourierOrderCard(summary) {
 
 function formatCourierListItem(order) {
   const unit = order.inventoryUnit?.unitCode || order.consoleType;
+  const serial = order.inventoryUnit?.serialNumber;
   const remaining = formatRemainingDuration(
     rentalReturnService.getExpectedReturnAt(order)
   );
   return (
-    `📦 <b>#${order.id}</b> — ${escapeHtml(unit)}\n` +
-    `👤 ${escapeHtml(order.user?.fullName || "—")}\n` +
+    `📦 <b>#${order.id}</b> — ${escapeHtml(unit)}` +
+    (serial ? `\n🔢 <code>${escapeHtml(serial)}</code>` : "") +
+    `\n👤 ${escapeHtml(order.user?.fullName || "—")}\n` +
     `📌 ${escapeHtml(statusLabel(order.status))}\n` +
     `⏳ ${escapeHtml(remaining)}`
   );

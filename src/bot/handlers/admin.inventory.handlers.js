@@ -187,9 +187,9 @@ async function handleCallback(bot, query, data, { telegramId } = {}) {
       await bot.sendMessage(
         chatId,
         `➕ <b>${consoleType}</b> qurilma qo'shish\n\n` +
-          `Seriya / asset kodini kiriting.\n` +
-          `Masalan: <code>${nextHint}</code>\n\n` +
-          `/skip — avtomatik kod\n` +
+          `1) Inventory Number (masalan <code>${nextHint}</code>)\n` +
+          `   yoki to'g'ridan-to'g'ri Serial Number\n\n` +
+          `Serial Number majburiy va UNIQUE.\n` +
           `/cancel — bekor qilish`,
         { parse_mode: "HTML", ...cancelKeyboard() }
       );
@@ -412,12 +412,37 @@ async function handleText(bot, msg, { telegramId } = {}) {
         return true;
       }
 
-      const skip = text === "/skip" || text === "-";
-      const raw = skip ? null : text.toUpperCase().replace(/\s+/g, "");
+      if (text === "/skip" || text === "-") {
+        await bot.sendMessage(
+          chatId,
+          "❌ Serial Number majburiy.\nQurilma orqa tomonidagi Serial ni kiriting (yoki /cancel)."
+        );
+        return true;
+      }
 
+      const raw = text.toUpperCase().replace(/\s+/g, "");
       let assetCode = raw;
       let serialNumber = raw;
-      if (raw && !/^(PS3|PS4|PS5)-\d+$/i.test(raw)) {
+      // If looks like PS5-001 use as inventory number and ask... actually wizard historically
+      // used one field for both. Prefer: if PSX-NNN → assetCode; always require serial.
+      // Prompt flow stores inventory number earlier — check session for pending code.
+      const pendingCode = session.data._invAddCode || undefined;
+      if (raw && /^(PS3|PS4|PS5)-\d+$/i.test(raw) && !pendingCode) {
+        // First entry is inventory number — ask serial next
+        sessionStore.updateData(chatId, { _invAddCode: raw.toUpperCase() });
+        await bot.sendMessage(
+          chatId,
+          `Inventory Number: <b>${raw.toUpperCase()}</b>\n\nEndi <b>Serial Number</b> ni kiriting:`,
+          { parse_mode: "HTML" }
+        );
+        return true;
+      }
+
+      if (pendingCode) {
+        assetCode = pendingCode;
+        serialNumber = raw;
+      } else {
+        // Free-form serial; auto-generate inventory number
         assetCode = undefined;
         serialNumber = raw;
       }
@@ -425,17 +450,21 @@ async function handleText(bot, msg, { telegramId } = {}) {
       const created = await inventoryAssetService.createAsset(
         {
           model: consoleType,
-          assetCode: skip ? undefined : assetCode,
-          serialNumber: skip ? undefined : serialNumber,
-          displayName: skip ? undefined : assetCode || serialNumber,
+          assetCode,
+          serialNumber,
+          displayName: assetCode || serialNumber,
         },
         adminContext
       );
 
       resetConversation(chatId);
-      await bot.sendMessage(chatId, `✅ Qurilma qo'shildi: <b>${created.assetCode}</b>`, {
-        parse_mode: "HTML",
-      });
+      await bot.sendMessage(
+        chatId,
+        `✅ Qurilma qo'shildi\n` +
+          `🏷 <b>${created.assetCode || created.unitCode}</b>\n` +
+          `🔢 Serial: <code>${created.serialNumber || "—"}</code>`,
+        { parse_mode: "HTML" }
+      );
       await sendModelPage(bot, chatId, consoleType);
       return true;
     }

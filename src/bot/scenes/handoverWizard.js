@@ -129,22 +129,18 @@ async function startHandoverWizard(bot, chatId, orderId, courier) {
     await bot.sendMessage(chatId, "Bu buyurtma sizga tegishli emas");
     return;
   }
-  if (!order.inventoryUnitId) {
-    await bot.sendMessage(
-      chatId,
-      "❗️ Buyurtmaga InventoryUnit biriktirilmagan.\nAdmin qayta tasdiqlashi kerak."
-    );
-    return;
-  }
 
+  const legacyBound = Boolean(order.inventoryUnitId);
   const unitLabel = order.inventoryUnit?.unitCode || order.consoleType || "—";
+  const serialLabel = order.inventoryUnit?.serialNumber || "—";
 
   let session;
   try {
     session = await deliverySessionService.startOrResume({
       orderId,
       courierId: courier.id,
-      inventoryUnitId: order.inventoryUnitId,
+      inventoryUnitId: order.inventoryUnitId || null,
+      startStep: legacyBound ? DeliveryStep.JOYSTICKS : DeliveryStep.UNIT_SELECT,
     });
   } catch (err) {
     const msg =
@@ -155,26 +151,42 @@ async function startHandoverWizard(bot, chatId, orderId, courier) {
 
   clearPhotoRamPointer(chatId);
 
-  const resumed = session.currentStep !== DeliveryStep.JOYSTICKS || hasAccessoryKit(session);
-  await bot.sendMessage(
-    chatId,
-    `📍 Topshirish wizard (#${orderId})\n\n` +
-      `🎮 Konsol (InventoryUnit): <b>${unitLabel}</b>\n` +
-      `Status: RESERVED → topshirishda RENTED\n` +
-      (resumed ? `\n♻️ Davom ettirilmoqda (tanlovlar saqlangan).\n` : `\nEndi aksessuarlarni tanlang.`),
-    { parse_mode: "HTML" }
-  );
+  if (legacyBound) {
+    await bot.sendMessage(
+      chatId,
+      `📍 Topshirish wizard (#${orderId})\n\n` +
+        `🎮 Konsol: <b>${unitLabel}</b>\n` +
+        `🔢 Serial: <code>${serialLabel}</code>\n` +
+        `(Legacy bron — aksessuarlarni tanlang)`,
+      { parse_mode: "HTML" }
+    );
+  } else {
+    await bot.sendMessage(
+      chatId,
+      `📍 Topshirish wizard (#${orderId})\n\n` +
+        `🎮 Model: <b>${order.consoleType}</b>\n\n` +
+        `Qo'lingizdagi PlayStation orqa tomonidagi <b>Serial Number</b> ga qarab\n` +
+        `AVAILABLE qurilmani tanlang.`,
+      { parse_mode: "HTML" }
+    );
+  }
 
-  await resumeAtStep(bot, chatId, orderId, session);
+  await resumeAtStep(bot, chatId, orderId, session, order);
   await deliveryHandoverService.notifyAdminStep(
     orderId,
-    `Yetib kelindi — topshirish (${unitLabel})`
+    legacyBound
+      ? `Yetib kelindi — topshirish (${unitLabel})`
+      : `Yetib kelindi — Serial tanlash (${order.consoleType})`
   );
 }
 
 /** Continue from persisted currentStep without wiping selections. */
-async function resumeAtStep(bot, chatId, orderId, session) {
+async function resumeAtStep(bot, chatId, orderId, session, order = null) {
   const step = session.currentStep;
+  if (step === DeliveryStep.UNIT_SELECT) {
+    await askUnitSelect(bot, chatId, orderId, order);
+    return;
+  }
   if (step === DeliveryStep.PHOTO) {
     await askPhoto(bot, chatId, orderId);
     return;
@@ -196,6 +208,25 @@ async function resumeAtStep(bot, chatId, orderId, session) {
     return;
   }
   await askJoysticks(bot, chatId, orderId);
+}
+
+async function askUnitSelect(bot, chatId, orderId, orderHint = null) {
+  await deliverySessionService.setStep(orderId, DeliveryStep.UNIT_SELECT);
+  const order = orderHint || (await orderService.getOrderById(orderId));
+  const orderReservationService = require("../../services/orderReservation.service");
+  const units = await orderReservationService.listAvailableUnitsForHandover(
+    order.consoleType
+  );
+  await bot.sendMessage(
+    chatId,
+    `1️⃣ Qaysi PlayStation topshirilmoqda?\n` +
+      `Model: <b>${order.consoleType}</b>\n` +
+      `Faqat AVAILABLE. Serial raqamni tekshiring.`,
+    {
+      parse_mode: "HTML",
+      ...invKb.unitPickKeyboard(orderId, units),
+    }
+  );
 }
 
 async function askJoysticks(bot, chatId, orderId) {
@@ -330,17 +361,50 @@ async function handleHwCallback(bot, query, courier, parts, chatId) {
   // Ensure session exists (resume after bot restart)
   let session = await deliverySessionService.getByOrderId(orderId);
   if (!session || session.status !== "IN_PROGRESS") {
-    if (!order.inventoryUnitId) {
-      await bot.sendMessage(chatId, "❗️ InventoryUnit biriktirilmagan.");
-      return true;
-    }
     session = await deliverySessionService.startOrResume({
       orderId,
       courierId: courier.id,
-      inventoryUnitId: order.inventoryUnitId,
+      inventoryUnitId: order.inventoryUnitId || null,
+      startStep: order.inventoryUnitId
+        ? DeliveryStep.JOYSTICKS
+        : DeliveryStep.UNIT_SELECT,
     });
   } else {
     await deliverySessionService.requireInProgress(orderId, courier.id);
+  }
+
+  if (action === "unit") {
+    const unitId = Number(parts[4]);
+    if (!Number.isFinite(unitId)) {
+      await bot.sendMessage(chatId, "Noto'g'ri qurilma");
+      return true;
+    }
+    const orderReservationService = require("../../services/orderReservation.service");
+    const units = await orderReservationService.listAvailableUnitsForHandover(
+      order.consoleType
+    );
+    const picked = units.find((u) => u.id === unitId);
+    if (!picked) {
+      await bot.sendMessage(
+        chatId,
+        "❌ Bu qurilma endi AVAILABLE emas. Ro'yxatni yangilang."
+      );
+      await askUnitSelect(bot, chatId, orderId, order);
+      return true;
+    }
+    await deliverySessionService.patch(orderId, { inventoryUnitId: unitId });
+    await deliverySessionService.setStep(orderId, DeliveryStep.JOYSTICKS);
+    await clearKb(bot, query);
+    await bot.sendMessage(
+      chatId,
+      `✅ Tanlandi\n\n` +
+        `🎮 <b>${picked.unitCode}</b>\n` +
+        `🔢 Serial: <code>${picked.serialNumber || "—"}</code>\n\n` +
+        `Endi aksessuarlarni tanlang.`,
+      { parse_mode: "HTML" }
+    );
+    await askJoysticks(bot, chatId, orderId);
+    return true;
   }
 
   if (action === "console") {
@@ -403,12 +467,13 @@ async function handleHandoverCallback(bot, query, courier, parts, chatId) {
   const order = await assertOwnedOrder(orderId, courier);
   const session = await deliverySessionService.requireInProgress(orderId, courier.id);
 
-  // InventoryUnit must be bound — NEVER require legacy consoleItemId
+  // Unit must be selected in session (or legacy on order) before accessories/payment
   if (!hasUnitBound(session, order)) {
     await bot.sendMessage(
       chatId,
-      "❗️ Buyurtmaga InventoryUnit biriktirilmagan. Admin qayta tasdiqlashi kerak."
+      "❗️ Avval PlayStation ni Serial Number bo'yicha tanlang."
     );
+    await askUnitSelect(bot, chatId, orderId, order);
     return true;
   }
 
@@ -609,6 +674,7 @@ async function handlePhotoMessage(bot, msg, courier) {
     const updated = await deliveryHandoverService.completeHandover({
       orderId,
       courierId: courier.id,
+      inventoryUnitId: session.inventoryUnitId || null,
       consoleItemId: session.consoleItemId || null,
       joystickIds: joystickIdsOf(session),
       hdmiItemId: session.selectedHdmiId,
@@ -630,13 +696,15 @@ async function handlePhotoMessage(bot, msg, courier) {
     const { formatRemainingDuration } = require("../../utils/dateHelper");
     const remaining = formatRemainingDuration(end);
     const unitCode = updated.inventoryUnit?.unitCode || "—";
+    const serial = updated.inventoryUnit?.serialNumber || "—";
     await bot.sendMessage(
       chatId,
       `✅ Topshirish muvaffaqiyatli yakunlandi.\n\n` +
         `Buyurtma #${orderId} — faol ijara.\n` +
-        `🏷 Qurilma: <b>${unitCode}</b> (RENTED)\n` +
-        `⏳ Ijara tugashiga: ${remaining}\n` +
-        `Status: ${updated.status}`,
+        `🏷 Qurilma: <b>${unitCode}</b>\n` +
+        `🔢 Serial: <code>${serial}</code>\n` +
+        `📌 Status: RENTED\n` +
+        `⏳ Qolgan: ${remaining}`,
       {
         parse_mode: "HTML",
         ...courierKeyboards.mainMenuKeyboard(),

@@ -1,13 +1,12 @@
 /**
- * Order ↔ InventoryUnit reservation — single source of truth.
+ * Order ↔ InventoryUnit binding.
  *
- * Lifecycle (asset):
- *   AVAILABLE → (admin approve) → RESERVED → (handover) → RENTED → … → AVAILABLE
+ * NEW lifecycle (serial-based):
+ *   Order create / admin confirm → inventoryUnitId NULL
+ *   Courier handover → pick AVAILABLE by serial → bind + RENTED
+ *   Return → INSPECTION → admin → AVAILABLE | MAINTENANCE (REPAIR)
  *
- * Rules:
- * - Admin confirm MUST bind a concrete InventoryUnit to Order.inventoryUnitId
- * - Courier accept NEVER searches "first AVAILABLE" — uses the reserved unit
- * - Race-safe via updateMany (AVAILABLE → RESERVED) + unique occupying index
+ * Legacy: some in-flight orders may already have RESERVED unit from old confirm flow.
  */
 const prisma = require("../config/prisma");
 const inventoryAssetService = require("./inventoryAsset.service");
@@ -17,11 +16,7 @@ const { OrderAssignmentError } = require("../errors/order.errors");
 const orderRepository = require("../repositories/order.repository");
 
 /**
- * Reserve an AVAILABLE InventoryUnit for the order inside an existing transaction.
- * Idempotent if order already has inventoryUnitId.
- *
- * @param {import('@prisma/client').Prisma.TransactionClient} tx
- * @param {{ orderId: number, consoleType: string, actorType?: string, actorId?: number|null, unitId?: number|null }} opts
+ * @deprecated Prefer bindUnitAtHandover. Kept for emergency admin tooling / legacy heal.
  */
 async function reserveUnitForOrder(
   tx,
@@ -39,43 +34,9 @@ async function reserveUnitForOrder(
   }
 
   if (order.inventoryUnitId) {
-    const existing = await client.inventoryUnit.findUnique({
-      where: { id: order.inventoryUnitId },
-    });
-    if (!existing) {
-      throw new OrderAssignmentError(
-        "NO_INVENTORY",
-        "Buyurtmadagi inventar qurilmasi topilmadi"
-      );
-    }
-    if (
-      existing.status !== AssetStatus.RESERVED &&
-      existing.status !== AssetStatus.RENTED
-    ) {
-      // Heal: ensure reserved link matches status for active reservation
-      if (existing.status === AssetStatus.AVAILABLE) {
-        const locked = await client.inventoryUnit.updateMany({
-          where: { id: existing.id, status: AssetStatus.AVAILABLE },
-          data: { status: AssetStatus.RESERVED },
-        });
-        if (locked.count === 1) {
-          await inventoryAssetService.logHistory(client, existing.id, {
-            action: "RESERVED",
-            fromStatus: AssetStatus.AVAILABLE,
-            toStatus: AssetStatus.RESERVED,
-            orderId: oid,
-            note: `Re-lock for order #${oid}`,
-            actorType,
-            actorId,
-          });
-          return client.inventoryUnit.findUnique({ where: { id: existing.id } });
-        }
-      }
-    }
-    return existing;
+    return client.inventoryUnit.findUnique({ where: { id: order.inventoryUnitId } });
   }
 
-  // Explicit unit (admin picked) or first AVAILABLE for model
   if (unitId) {
     const locked = await client.inventoryUnit.updateMany({
       where: {
@@ -96,7 +57,7 @@ async function reserveUnitForOrder(
         where: { id: oid },
         data: { inventoryUnitId: Number(unitId) },
       });
-    } catch (err) {
+    } catch (_) {
       await client.inventoryUnit.updateMany({
         where: { id: Number(unitId), status: AssetStatus.RESERVED },
         data: { status: AssetStatus.AVAILABLE },
@@ -111,16 +72,15 @@ async function reserveUnitForOrder(
       fromStatus: AssetStatus.AVAILABLE,
       toStatus: AssetStatus.RESERVED,
       orderId: oid,
-      note: `Order #${oid} (explicit)`,
+      note: `Order #${oid} (legacy reserve)`,
       actorType,
       actorId,
     });
     return client.inventoryUnit.findUnique({ where: { id: Number(unitId) } });
   }
 
-  let unit;
   try {
-    unit = await inventoryAssetService.reserveForOrder(client, {
+    return await inventoryAssetService.reserveForOrder(client, {
       orderId: oid,
       consoleType: consoleType || order.consoleType,
       actorType,
@@ -132,20 +92,120 @@ async function reserveUnitForOrder(
     }
     throw err;
   }
-
-  if (!unit) {
-    throw new OrderAssignmentError(
-      "NO_INVENTORY",
-      `Bo'sh ${consoleType || order.consoleType} inventar yo'q (AVAILABLE). ` +
-        `Admin Inventar bo'limidan qurilma qo'shing yoki ta'mirdan chiqaring.`
-    );
-  }
-
-  return unit;
 }
 
 /**
- * Courier path: load the unit already bound to the order. Never search AVAILABLE.
+ * Handover: race-safe bind AVAILABLE unit → RENTED + Order.inventoryUnitId.
+ * Also supports legacy RESERVED unit already on the order.
+ *
+ * @param {import('@prisma/client').Prisma.TransactionClient} tx
+ */
+async function bindUnitAtHandover(
+  tx,
+  { orderId, unitId, actorType = "courier", actorId = null }
+) {
+  const oid = Number(orderId);
+  const uid = Number(unitId);
+
+  const order = await tx.order.findUnique({
+    where: { id: oid },
+    include: { inventoryUnit: true },
+  });
+  if (!order) {
+    throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
+  }
+
+  // Already bound to this unit
+  if (order.inventoryUnitId && Number(order.inventoryUnitId) === uid) {
+    const unit = order.inventoryUnit;
+    if (unit.status === AssetStatus.RENTED) return unit;
+    if (unit.status === AssetStatus.RESERVED) {
+      await inventoryAssetService.changeStatus(uid, AssetStatus.RENTED, {
+        tx,
+        orderId: oid,
+        action: "RENTED",
+        note: `Handover legacy RESERVED → RENTED #${oid}`,
+        actorType,
+        actorId,
+      });
+      return tx.inventoryUnit.findUnique({ where: { id: uid } });
+    }
+    throw new OrderAssignmentError(
+      "INVALID_UNIT",
+      `Biriktirilgan qurilma holati noto'g'ri: ${unit.status}`
+    );
+  }
+
+  if (order.inventoryUnitId && Number(order.inventoryUnitId) !== uid) {
+    throw new OrderAssignmentError(
+      "ALREADY_BOUND",
+      "Buyurtmaga boshqa qurilma allaqachon biriktirilgan"
+    );
+  }
+
+  const occupied = await isUnitOccupiedByOtherOrder(tx, uid, oid);
+  if (occupied) {
+    throw new OrderAssignmentError(
+      "NO_INVENTORY",
+      "Bu qurilma boshqa faol buyurtmada band"
+    );
+  }
+
+  const unit = await tx.inventoryUnit.findUnique({ where: { id: uid } });
+  if (!unit) {
+    throw new OrderAssignmentError("NO_INVENTORY", "Qurilma topilmadi");
+  }
+  if (unit.consoleType !== order.consoleType) {
+    throw new OrderAssignmentError(
+      "CONSOLE_TYPE",
+      `Qurilma turi mos emas: ${unit.consoleType} ≠ ${order.consoleType}`
+    );
+  }
+
+  // Race-safe: only one courier wins AVAILABLE → RENTED
+  const locked = await tx.inventoryUnit.updateMany({
+    where: { id: uid, status: AssetStatus.AVAILABLE },
+    data: { status: AssetStatus.RENTED },
+  });
+  if (locked.count !== 1) {
+    throw new OrderAssignmentError(
+      "NO_INVENTORY",
+      "Qurilma AVAILABLE emas yoki boshqa kuryer tomonidan band qilindi. Qayta tanlang."
+    );
+  }
+
+  try {
+    await tx.order.update({
+      where: { id: oid },
+      data: { inventoryUnitId: uid },
+    });
+  } catch (err) {
+    await tx.inventoryUnit.updateMany({
+      where: { id: uid, status: AssetStatus.RENTED },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+    throw new OrderAssignmentError(
+      "NO_INVENTORY",
+      "Qurilmani buyurtmaga biriktirib bo'lmadi (race). Qayta urinib ko'ring."
+    );
+  }
+
+  await inventoryAssetService.logHistory(tx, uid, {
+    action: "RENTED",
+    fromStatus: AssetStatus.AVAILABLE,
+    toStatus: AssetStatus.RENTED,
+    orderId: oid,
+    note: `Handover bind #${oid} serial=${unit.serialNumber || "—"}`,
+    actorType,
+    actorId,
+  });
+
+  return tx.inventoryUnit.findUnique({ where: { id: uid } });
+}
+
+/**
+ * Legacy helper: load unit if already bound (RESERVED/RENTED).
+ * New orders have null until handover — callers must not require this at accept.
  */
 async function getReservedUnitForOrder(tx, orderId) {
   const client = tx || prisma;
@@ -157,28 +217,20 @@ async function getReservedUnitForOrder(tx, orderId) {
     throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
   }
   if (!order.inventoryUnitId || !order.inventoryUnit) {
-    throw new OrderAssignmentError(
-      "NO_RESERVATION",
-      "Buyurtmaga inventar biriktirilmagan. Admin qayta tasdiqlashi kerak."
-    );
+    return null;
   }
-  const unit = order.inventoryUnit;
-  if (unit.status !== AssetStatus.RESERVED && unit.status !== AssetStatus.RENTED) {
-    throw new OrderAssignmentError(
-      "NO_RESERVATION",
-      `Biriktirilgan qurilma (${unit.unitCode}) RESERVED emas (hozir: ${unit.status}). ` +
-        `Admin qayta tasdiqlashi kerak.`
-    );
-  }
-  return unit;
+  return order.inventoryUnit;
 }
 
 /**
- * Admin confirm: PENDING → ADMIN_CONFIRMED + reserve InventoryUnit (one transaction).
+ * Admin confirm: PENDING → ADMIN_CONFIRMED. Does NOT bind InventoryUnit.
  */
 async function confirmOrderWithReservation(orderId, adminTelegramId, { unitId = null } = {}) {
   const orderConfirmationService = require("./orderConfirmation.service");
   const { OrderStatus } = require("../constants/orderStatus");
+
+  // unitId ignored — binding happens at courier handover by serial
+  void unitId;
 
   const confirmedId = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: Number(orderId) } });
@@ -193,21 +245,14 @@ async function confirmOrderWithReservation(orderId, adminTelegramId, { unitId = 
       );
     }
 
-    const unit = await reserveUnitForOrder(tx, {
-      orderId: order.id,
-      consoleType: order.consoleType,
-      actorType: "admin",
-      actorId: null, // telegram id may exceed Int32
-      unitId,
-    });
-
     await tx.order.update({
       where: { id: order.id },
       data: {
         status: OrderStatus.ADMIN_CONFIRMED,
         confirmedAt: new Date(),
         isHighPriority: false,
-        inventoryUnitId: unit.id,
+        // Explicit: do not bind unit at confirm
+        inventoryUnitId: null,
       },
     });
 
@@ -217,7 +262,7 @@ async function confirmOrderWithReservation(orderId, adminTelegramId, { unitId = 
       {
         actorType: "admin",
         actorId: adminTelegramId,
-        note: `Admin tasdiqladi — ${unit.unitCode} RESERVED`,
+        note: "Admin tasdiqladi — PlayStation topshirishda Serial Number bo'yicha tanlanadi",
       },
       tx
     );
@@ -228,9 +273,6 @@ async function confirmOrderWithReservation(orderId, adminTelegramId, { unitId = 
   return orderRepository.findById(confirmedId);
 }
 
-/**
- * True if another non-terminal order already holds this unit.
- */
 async function isUnitOccupiedByOtherOrder(tx, unitId, excludeOrderId) {
   const client = tx || prisma;
   const n = await client.order.count({
@@ -243,9 +285,24 @@ async function isUnitOccupiedByOtherOrder(tx, unitId, excludeOrderId) {
   return n > 0;
 }
 
+/**
+ * List AVAILABLE units for handover pick (model + serial).
+ */
+async function listAvailableUnitsForHandover(consoleType) {
+  return prisma.inventoryUnit.findMany({
+    where: {
+      consoleType,
+      status: AssetStatus.AVAILABLE,
+    },
+    orderBy: { unitCode: "asc" },
+  });
+}
+
 module.exports = {
   reserveUnitForOrder,
+  bindUnitAtHandover,
   getReservedUnitForOrder,
   confirmOrderWithReservation,
   isUnitOccupiedByOtherOrder,
+  listAvailableUnitsForHandover,
 };

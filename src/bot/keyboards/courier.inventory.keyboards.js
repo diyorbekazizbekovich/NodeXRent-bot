@@ -15,6 +15,27 @@ function chunkButtons(items, callbackBuilder, perRow = 1) {
   return rows;
 }
 
+function unitPickKeyboard(orderId, units) {
+  const rows = (units || []).map((u) => [
+    {
+      text: `${u.unitCode} · ${u.serialNumber || "SN yo'q"}`,
+      callback_data: `courier:hw:unit:${orderId}:${u.id}`,
+    },
+  ]);
+  if (!rows.length) {
+    rows.push([
+      {
+        text: "❌ AVAILABLE qurilma yo'q",
+        callback_data: "courier:hw:noop",
+      },
+    ]);
+  }
+  rows.push([
+    { text: "❌ Wizardni bekor qilish", callback_data: `courier:hw:cancel:${orderId}` },
+  ]);
+  return { reply_markup: { inline_keyboard: rows } };
+}
+
 function consolePickKeyboard(orderId, consoles) {
   const rows = chunkButtons(consoles, (c) => `courier:hw:console:${orderId}:${c.id}`);
   if (!rows.length) {
@@ -105,6 +126,7 @@ function returnConditionKeyboard(orderId) {
 }
 
 module.exports = {
+  unitPickKeyboard,
   consolePickKeyboard,
   joystickPickKeyboard,
   singlePickKeyboard,

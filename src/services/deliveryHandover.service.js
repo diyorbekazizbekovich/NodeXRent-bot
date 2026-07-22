@@ -54,6 +54,7 @@ function money(n) {
 async function completeHandover({
   orderId,
   courierId,
+  inventoryUnitId = null,
   consoleItemId,
   joystickIds,
   hdmiItemId,
@@ -109,12 +110,35 @@ async function completeHandover({
     if (!HANDOVER_ALLOWED_FROM.has(order.status)) {
       throw new DeliveryHandoverError("INVALID_STATUS", `Noto'g'ri holat: ${order.status}`);
     }
-    if (!order.inventoryUnitId) {
+
+    // Bind InventoryUnit by serial pick (or finalize legacy RESERVED → RENTED)
+    const orderReservationService = require("./orderReservation.service");
+    const unitIdToBind = inventoryUnitId || order.inventoryUnitId;
+    if (!unitIdToBind) {
       throw new DeliveryHandoverError(
         "NO_UNIT",
-        "Buyurtmaga InventoryUnit biriktirilmagan. Admin qayta tasdiqlashi kerak."
+        "PlayStation tanlanmagan. Serial Number bo'yicha qurilmani tanlang."
       );
     }
+
+    let boundUnit;
+    try {
+      boundUnit = await orderReservationService.bindUnitAtHandover(tx, {
+        orderId: order.id,
+        unitId: unitIdToBind,
+        actorType: "courier",
+        actorId: Number(courierId),
+      });
+    } catch (err) {
+      throw new DeliveryHandoverError(
+        err.code || "NO_UNIT",
+        err.message || "Qurilmani biriktirib bo'lmadi"
+      );
+    }
+
+    // Refresh order snapshot after bind
+    order.inventoryUnitId = boundUnit.id;
+    order.inventoryUnit = boundUnit;
 
     // Legacy optional CONSOLE InventoryItem — primary console is InventoryUnit
     let consoleItem = null;
@@ -172,6 +196,7 @@ async function completeHandover({
         collateralReturned: false,
         deliveredByCourierId: Number(courierId),
         deliveryCompletedAt: now,
+        inventoryUnitId: boundUnit.id,
         consoleItemId: consoleItem?.id ?? null,
         hdmiItemId: hdmi.id,
         powerItemId: power.id,
@@ -181,7 +206,6 @@ async function completeHandover({
       throw new DeliveryHandoverError("ALREADY_DONE", "Buyurtma allaqachon topshirilgan");
     }
 
-    // ACTIVE = faol ijara (ACTIVE_RENTAL)
     const rentalReturnService = require("./rentalReturn.service");
     const { rentalStartAt, expectedReturnAt } = rentalReturnService.computeRentalWindow(
       order,
@@ -198,14 +222,16 @@ async function completeHandover({
       },
     });
 
-    // Device: RESERVED → RENTED (synced with ACTIVE)
+    // Unit already RENTED via bindUnitAtHandover; sync optional courier Playstation
     const deviceStatusService = require("./deviceStatus.service");
-    await deviceStatusService.syncDeviceToOrderStatus(
-      tx,
-      { id: order.id, playstationId: order.playstationId, inventoryUnitId: order.inventoryUnitId },
-      "ACTIVE",
-      { actorType: "courier", actorId: courierId, reason: "HANDOVER_ACTIVE" }
-    );
+    if (order.playstationId) {
+      await deviceStatusService.syncDeviceToOrderStatus(
+        tx,
+        { id: order.id, playstationId: order.playstationId, inventoryUnitId: boundUnit.id },
+        "ACTIVE",
+        { actorType: "courier", actorId: courierId, reason: "HANDOVER_ACTIVE" }
+      );
+    }
 
     await tx.orderStatusLog.create({
       data: {
@@ -213,7 +239,7 @@ async function completeHandover({
         status: "DELIVERED",
         actorType: "courier",
         actorId: Number(courierId),
-        note: `Handover inventory+payment ${paymentMethod}/${collateralType}`,
+        note: `Handover ${boundUnit.unitCode} SN=${boundUnit.serialNumber || "—"} ${paymentMethod}/${collateralType}`,
       },
     });
     await tx.orderStatusLog.create({
@@ -229,12 +255,14 @@ async function completeHandover({
     await rentalReturnService.logRentalAudit({
       action: "DELIVERED_RENTAL_STARTED",
       orderId: order.id,
-      inventoryUnitId: order.inventoryUnitId,
+      inventoryUnitId: boundUnit.id,
       actorType: "courier",
       actorId: courierId,
       extra: {
         rentalStartAt: rentalStartAt.toISOString(),
         expectedReturnAt: expectedReturnAt.toISOString(),
+        unitCode: boundUnit.unitCode,
+        serialNumber: boundUnit.serialNumber,
       },
     });
 
@@ -278,9 +306,6 @@ async function completeHandover({
       });
     }
 
-    // Do NOT mark DeliverySession COMPLETED inside TX — post-TX notify used to throw
-    // (meta.console null) after commit, leaving COMPLETED session + orphan RAM photo trap.
-
     return {
       orderId: order.id,
       basePrice,
@@ -295,8 +320,9 @@ async function completeHandover({
       hdmi,
       power,
       orderSnapshot: order,
-      inventoryUnitId: order.inventoryUnitId,
-      unitCode: order.inventoryUnit?.unitCode || null,
+      inventoryUnitId: boundUnit.id,
+      unitCode: boundUnit.unitCode,
+      serialNumber: boundUnit.serialNumber,
     };
   });
 
@@ -582,11 +608,29 @@ async function completeReturn({
         status: OrderStatus.PICKED_UP,
         actorType: "courier",
         actorId: Number(courierId),
-        note: "Courier picked up — awaiting admin inspection",
+        note: "Courier picked up — unit → INSPECTION",
       },
     });
 
-    // InventoryUnit MUST stay RENTED (admin inspection next)
+    // Console asset: RENTED → INSPECTION (awaiting admin decision)
+    if (order.inventoryUnitId) {
+      const inventoryAssetService = require("./inventoryAsset.service");
+      const { AssetStatus } = require("../constants/inventoryAsset");
+      const unit = await tx.inventoryUnit.findUnique({
+        where: { id: order.inventoryUnitId },
+      });
+      if (unit?.status === AssetStatus.RENTED) {
+        await inventoryAssetService.changeStatus(unit.id, AssetStatus.INSPECTION, {
+          tx,
+          orderId: order.id,
+          action: "RETURN_INSPECTION",
+          note: "Courier return confirmed",
+          actorType: "courier",
+          actorId: Number(courierId),
+        });
+      }
+    }
+
     return order;
   });
 

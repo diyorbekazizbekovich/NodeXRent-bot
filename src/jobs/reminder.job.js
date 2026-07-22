@@ -4,8 +4,8 @@ const reminderService = require("../services/reminder.service");
 const { startOnce } = require("./jobGuard");
 
 /**
- * Har daqiqada: 6h confirm-ready, 3/2/1h user, 2h priority, return reminders.
- * Idempotent — OrderReminderLog orqali qayta yuborilmaydi.
+ * Har daqiqada: 6h confirm-ready, 3/2/1h user (exact minute), 2h priority, return reminders.
+ * User start reminders never catch up missed minutes — OrderReminderLog claims sent/skipped.
  */
 function startReminderJob() {
   startOnce("reminder", () => {

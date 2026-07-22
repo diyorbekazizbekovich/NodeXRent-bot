@@ -84,21 +84,7 @@ async function assignOrderByAdmin(orderId, courierId) {
     );
   }
 
-  // Ensure reservation exists (same contract as courier accept)
-  if (!order.inventoryUnitId) {
-    const orderReservationService = require("./orderReservation.service");
-    const prisma = require("../config/prisma");
-    await prisma.$transaction(async (tx) => {
-      await orderReservationService.reserveUnitForOrder(tx, {
-        orderId,
-        consoleType: order.consoleType,
-        actorType: "admin",
-        actorId: null,
-      });
-    });
-    order = await orderRepository.findById(orderId);
-  }
-
+  // Emergency assign: do NOT bind unit — courier picks serial at handover
   await courierWorkflowService.assignWithRetry(orderId, courierId, order, {
     assignedByAdmin: true,
   });

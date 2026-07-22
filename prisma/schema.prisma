@@ -198,6 +198,7 @@ model Courier {
 
 /// Persistent courier delivery (handover) wizard state — survives restarts / RAM clears.
 enum DeliverySessionStep {
+  UNIT_SELECT
   JOYSTICKS
   HDMI
   POWER

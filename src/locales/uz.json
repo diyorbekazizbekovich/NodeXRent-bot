@@ -7,7 +7,7 @@
     "menuBtn": "🌐 Til / Язык"
   },
   "welcome": {
-    "hello": "Assalomu alaykum, {{name}}! 👋\n\nPlayStation ijara botiga xush kelibsiz.\nDavom etish uchun telefon raqamingizni yuboring:",
+    "hello": "Assalomu alaykum, {{name}}! 👋\n\n🎮 PlayStation ijara botiga xush kelibsiz.\n\n📱 Davom etish uchun telefon raqamingizni yuboring.\n\n📢 Yangiliklar, aksiyalar va chegirmalarni kuzatib boring:\n👉 Rasmiy kanal: @NodeXRent",
     "askLocation": "📍 Endi Telegram orqali lokatsiyangizni yuboring (Toshkent shahri ichida):",
     "mainMenu": "🏠 Asosiy menyu:",
     "phoneSaved": "✅ Telefon raqamingiz saqlandi.\n\n📍 Endi Telegram orqali lokatsiyangizni yuboring (Toshkent shahri ichida):",

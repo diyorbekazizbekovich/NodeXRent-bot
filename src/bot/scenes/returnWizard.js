@@ -36,7 +36,7 @@ async function startReturnWizard(bot, chatId, orderId) {
     return;
   }
 
-  if (!order.orderItems?.length) {
+  if (!order.inventoryUnitId && !order.orderItems?.length) {
     await bot.sendMessage(
       chatId,
       `❗️ Buyurtma #${orderId} uchun inventar bog'lanmagan.\n` +
@@ -45,8 +45,19 @@ async function startReturnWizard(bot, chatId, orderId) {
     return false;
   }
 
+  const unit = order.inventoryUnit;
+  await bot.sendMessage(
+    chatId,
+    `↩️ <b>Qaytarilishi kerak bo'lgan qurilma</b>\n\n` +
+      `Model:\n<b>${order.consoleType}</b>\n\n` +
+      `Inventory:\n<b>${unit?.unitCode || "—"}</b>\n\n` +
+      `Serial:\n<code>${unit?.serialNumber || "—"}</code>\n\n` +
+      `Qo'ldagi Serial Number ni tekshiring — aynan shu qurilmani qaytaring.`,
+    { parse_mode: "HTML" }
+  );
+
   const confirmed = {};
-  for (const link of order.orderItems) {
+  for (const link of order.orderItems || []) {
     confirmed[link.id] = false;
   }
 
@@ -59,19 +70,29 @@ async function startReturnWizard(bot, chatId, orderId) {
     _retNote: null,
   });
 
-  await bot.sendMessage(
-    chatId,
-    `↩️ Qaytarib olish wizard (#${orderId})\n\n` +
-      `Faqat ushbu buyurtmaga berilgan inventarni tasdiqlang:`
-  );
-
-  for (const link of order.orderItems) {
-    const item = link.inventoryItem;
-    const label = `${labelItemType(link.role)} ${item?.inventoryNumber || link.inventoryItemId}`;
+  if (order.orderItems?.length) {
     await bot.sendMessage(
       chatId,
-      `📦 ${label}\nSN: ${item?.serialNumber || "—"}`,
-      invKb.returnConfirmItemKeyboard(orderId, link.id, label)
+      `↩️ Qaytarib olish wizard (#${orderId})\n\n` +
+        `Faqat ushbu buyurtmaga berilgan aksessuarlarni tasdiqlang:`
+    );
+
+    for (const link of order.orderItems) {
+      const item = link.inventoryItem;
+      const label = `${labelItemType(link.role)} ${item?.inventoryNumber || link.inventoryItemId}`;
+      await bot.sendMessage(
+        chatId,
+        `📦 ${label}\nSN: ${item?.serialNumber || "—"}`,
+        invKb.returnConfirmItemKeyboard(orderId, link.id, label)
+      );
+    }
+  } else {
+    // Unit-only legacy: skip accessory confirms
+    sessionStore.setStep(chatId, STEPS.COLLATERAL);
+    await bot.sendMessage(
+      chatId,
+      `Garov hujjati qaytarildimi?`,
+      invKb.returnCollateralKeyboard(orderId)
     );
   }
 
@@ -229,7 +250,7 @@ async function handlePhotoMessage(bot, msg, courier) {
       chatId,
       `✅ Qurilma olib olindi!\n` +
         `Buyurtma #${orderId} — ${updated.status}\n` +
-        `Admin tekshiruvi kutilmoqda (inventar hali RENTED).`
+        `Admin tekshiruvi kutilmoqda (inventar: INSPECTION).`
     );
   } catch (err) {
     sessionStore.updateData(chatId, { _retPhotoProcessing: false, _retAwaitPhoto: true });

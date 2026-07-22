@@ -34,22 +34,33 @@ function wrap(err) {
 }
 
 /**
- * Assign courier to order that already has a reserved InventoryUnit.
- * Does NOT search AVAILABLE inventory. Optional legacy Playstation claim is best-effort.
+ * Assign courier to ADMIN_CONFIRMED order.
+ * InventoryUnit is NOT required here — bound later at handover by serial.
+ * Optional legacy Playstation claim is best-effort.
  */
 async function claimReservedOrderForCourier(orderId, courierId, extra = {}) {
   const orderReservationService = require("./orderReservation.service");
 
   return prisma.$transaction(async (tx) => {
+    const orderRow = await tx.order.findUnique({
+      where: { id: Number(orderId) },
+      select: {
+        id: true,
+        consoleType: true,
+        startDatetime: true,
+        endDatetime: true,
+        inventoryUnitId: true,
+      },
+    });
+    if (!orderRow) {
+      throw new OrderAssignmentError("NOT_FOUND", "Buyurtma topilmadi");
+    }
+
+    // Legacy: if already reserved, keep reference; else null until handover
     const unit = await orderReservationService.getReservedUnitForOrder(tx, orderId);
 
-    // Optional legacy: courier-owned Playstation row (not required for warehouse inventory)
     let playstationId = null;
     try {
-      const orderRow = await tx.order.findUnique({
-        where: { id: Number(orderId) },
-        select: { consoleType: true, startDatetime: true, endDatetime: true },
-      });
       const availablePs = await playstationService.findAvailableForCourier(
         courierId,
         orderRow.consoleType,
@@ -87,7 +98,8 @@ async function claimReservedOrderForCourier(orderId, courierId, extra = {}) {
         playstationId,
         extra: {
           ...extra,
-          inventoryUnitId: unit.id,
+          // Do not force inventoryUnitId — leave null for new flow
+          ...(unit ? { inventoryUnitId: unit.id } : {}),
         },
       });
       if (result.count === 0) {
@@ -111,7 +123,9 @@ async function claimReservedOrderForCourier(orderId, courierId, extra = {}) {
         {
           actorType: "courier",
           actorId: courierId,
-          note: `Kuryer qabul qildi — inventar ${unit.unitCode} (RESERVED)`,
+          note: unit
+            ? `Kuryer qabul qildi — legacy unit ${unit.unitCode}`
+            : "Kuryer qabul qildi — PlayStation topshirishda Serial bo'yicha tanlanadi",
         },
         tx
       );
@@ -185,26 +199,7 @@ async function acceptOrder(orderId, courierId) {
     throw new OrderAssignmentError("FORBIDDEN", "Siz bu buyurtmani avval rad etgansiz");
   }
 
-  // Legacy heal: ADMIN_CONFIRMED without unit (pre-reservation architecture)
-  if (!order.inventoryUnitId) {
-    const orderReservationService = require("./orderReservation.service");
-    await prisma.$transaction(async (tx) => {
-      await orderReservationService.reserveUnitForOrder(tx, {
-        orderId,
-        consoleType: order.consoleType,
-        actorType: "system",
-        actorId: courierId,
-      });
-    });
-    order = await orderRepository.findById(orderId);
-  }
-
-  if (!order.inventoryUnitId) {
-    throw new OrderAssignmentError(
-      "NO_RESERVATION",
-      "Buyurtmaga inventar biriktirilmagan. Admin qayta tasdiqlashi kerak."
-    );
-  }
+  // Unit binding happens at handover (serial pick) — do NOT auto-reserve here
 
   await claimReservedOrderForCourier(orderId, courierId, { assignedByAdmin: false });
 

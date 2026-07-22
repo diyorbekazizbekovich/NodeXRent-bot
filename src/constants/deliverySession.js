@@ -4,6 +4,7 @@
  */
 
 const DeliveryStep = Object.freeze({
+  UNIT_SELECT: "UNIT_SELECT",
   JOYSTICKS: "JOYSTICKS",
   HDMI: "HDMI",
   POWER: "POWER",

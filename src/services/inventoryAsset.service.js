@@ -277,12 +277,20 @@ async function createAsset(data, adminContext = {}) {
       ? String(data.serialNumber).trim()
       : null;
 
+  if (!serialNumber) {
+    throw new InventoryAssetError(
+      "SERIAL_REQUIRED",
+      "Serial Number majburiy. Har bir qurilma unique Serial bilan qo'shiladi."
+    );
+  }
+
   return prisma.$transaction(async (tx) => {
-    if (serialNumber) {
-      const dup = await tx.inventoryUnit.findUnique({ where: { serialNumber } });
-      if (dup) {
-        throw new InventoryAssetError("DUPLICATE_SERIAL", "Serial raqam allaqachon mavjud");
-      }
+    const dupSerial = await tx.inventoryUnit.findUnique({ where: { serialNumber } });
+    if (dupSerial) {
+      throw new InventoryAssetError(
+        "DUPLICATE_SERIAL",
+        "❌ Bunday Serial Number allaqachon mavjud."
+      );
     }
 
     let unitCode = data.assetCode || data.unitCode;
@@ -290,7 +298,10 @@ async function createAsset(data, adminContext = {}) {
       unitCode = String(unitCode).trim().toUpperCase();
       const dupCode = await tx.inventoryUnit.findUnique({ where: { unitCode } });
       if (dupCode) {
-        throw new InventoryAssetError("DUPLICATE_ASSET_CODE", "Asset code allaqachon mavjud");
+        throw new InventoryAssetError(
+          "DUPLICATE_ASSET_CODE",
+          "❌ Bunday Inventory Number allaqachon mavjud."
+        );
       }
     } else {
       const existing = await tx.inventoryUnit.findMany({

@@ -451,12 +451,11 @@ function register(bot) {
         );
       } else if (action === "accept") {
         const order = await orderAssignmentService.acceptOrderByCourier(orderId, courier.id);
-        const unitCode = order.inventoryUnit?.unitCode || "—";
         await bot.sendMessage(
           chatId,
           `✅ Buyurtma #${order.id} qabul qilindi (COURIER_ASSIGNED).\n` +
-            `🏷 Qurilma: <b>${unitCode}</b>\n` +
-            `📌 Status: RESERVED → yetkazib berish`,
+            `🎮 Model: <b>${order.consoleType}</b>\n` +
+            `📌 Topshirishda qo'ldagi Serial Number bo'yicha qurilmani tanlaysiz.`,
           {
             parse_mode: "HTML",
             reply_markup: courierKeyboards.assignedOrderKeyboard(order.id).reply_markup,

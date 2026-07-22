@@ -1,18 +1,25 @@
 /**
  * Order start reminders + confirmation-ready / priority notifications.
- * Idempotent via OrderReminderLog unique (orderId, kind).
+ *
+ * User 3h/2h/1h reminders:
+ *  - Fire ONLY in the exact reminder minute (start − N hours)
+ *  - Missed minutes are claimed as skipped — never compensated after restart/late cron
+ *  - Idempotent flags via OrderReminderLog unique (orderId, kind)
  */
 const prisma = require("../config/prisma");
 const env = require("../config/env");
 const logger = require("../utils/logger");
 const { notify } = require("./notification.service");
 const { getAdminRecipients } = require("../utils/adminRecipients");
-const { formatDatetime, formatDate } = require("../utils/dateHelper");
+const { formatDatetime, formatDate, formatTime, TZ } = require("../utils/dateHelper");
 const {
   ReminderKind,
+  ReminderDecision,
   USER_REMINDER_HOURS,
   UNCONFIRMED_STATUSES,
   getHoursUntilStart,
+  decideUserStartReminder,
+  decideExactMinuteFire,
   isOrderConfirmed,
 } = require("../constants/orderConfirmation");
 const { canConfirmOrder, confirmWindowHours } = require("./orderConfirmation.service");
@@ -27,7 +34,7 @@ async function wasReminderSent(orderId, kind) {
 }
 
 /**
- * Atomically claim reminder slot. Returns false if already sent (race-safe).
+ * Atomically claim reminder slot (sent OR skipped). Returns false if already claimed.
  */
 async function claimReminderSlot(orderId, kind, meta = {}) {
   try {
@@ -49,14 +56,34 @@ function formatStartParts(startDatetime) {
   const d = new Date(startDatetime);
   return {
     date: formatDate(d),
-    time: d.toLocaleTimeString("uz-UZ", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: "Asia/Tashkent",
-    }),
+    time: formatTime(d),
     full: formatDatetime(d),
   };
+}
+
+function logUserReminder(event, { hours, order, reminderAt, now, reason }) {
+  const label = `${hours}h`;
+  const payload = {
+    context: "ReminderService",
+    event,
+    hours,
+    orderId: order.id,
+    userTelegramId: order.user?.telegramId?.toString?.() || null,
+    reminderTime: reminderAt ? formatTime(reminderAt) : null,
+    currentTime: formatTime(now),
+    timezone: TZ,
+    reminderAtIso: reminderAt?.toISOString?.() || null,
+    nowIso: new Date(now).toISOString(),
+  };
+  if (reason) payload.reason = reason;
+
+  if (event === "sent") {
+    logger.info(`Reminder ${label} sent`, payload);
+  } else if (event === "skipped") {
+    logger.info(`Reminder ${label} skipped`, payload);
+  } else {
+    logger.info(`Reminder ${label} ${event}`, payload);
+  }
 }
 
 function buildUserStartReminderText(order, hoursLeft) {
@@ -216,10 +243,13 @@ async function processPriorityReminders(now = new Date()) {
 }
 
 /**
- * User 3h / 2h / 1h start reminders.
+ * User 3h / 2h / 1h start reminders — exact-minute fire, no catch-up.
+ *
+ * Example: start 06:00 → fire at 03:00 / 04:00 / 05:00 only.
+ * If order created at 04:15: 3h+2h already passed → claim skipped; 1h waits for 05:00.
  */
 async function processUserStartReminders(now = new Date()) {
-  const maxH = 3;
+  const maxH = Math.max(...USER_REMINDER_HOURS.map((r) => r.hours));
   const deadline = new Date(now.getTime() + maxH * 60 * 60 * 1000);
 
   const orders = await prisma.order.findMany({
@@ -227,21 +257,46 @@ async function processUserStartReminders(now = new Date()) {
       status: {
         notIn: ["CANCELLED", "REJECTED", "COMPLETED", "RETURNED", "EXPIRED"],
       },
+      // Include orders whose start is still ahead OR whose earliest reminder
+      // minute might still need a SKIP claim (start within maxH).
       startDatetime: { lte: deadline, gt: now },
     },
     include: { user: true },
   });
 
   let sent = 0;
+  let skipped = 0;
+
   for (const order of orders) {
     if (!order.user?.telegramId) continue;
-    const hoursUntil = getHoursUntilStart(order.startDatetime, now);
 
     for (const { hours, kind } of USER_REMINDER_HOURS) {
-      if (hoursUntil > hours) continue;
-      const claimed = await claimReminderSlot(order.id, kind, { hours });
+      const decision = decideUserStartReminder(order.startDatetime, hours, now);
+
+      if (decision.action === ReminderDecision.WAIT) continue;
+
+      const claimed = await claimReminderSlot(order.id, kind, {
+        hours,
+        status: decision.action,
+        reminderAt: decision.reminderAt?.toISOString?.() || null,
+        reason: decision.reason || null,
+        timezone: TZ,
+      });
       if (!claimed) continue;
 
+      if (decision.action === ReminderDecision.SKIP) {
+        skipped += 1;
+        logUserReminder("skipped", {
+          hours,
+          order,
+          reminderAt: decision.reminderAt,
+          now,
+          reason: decision.reason,
+        });
+        continue;
+      }
+
+      // SEND
       await notify({
         orderId: order.id,
         type: "ORDER_START_REMINDER",
@@ -251,31 +306,65 @@ async function processUserStartReminders(now = new Date()) {
         text: buildUserStartReminderText(order, hours),
       });
       sent += 1;
+      logUserReminder("sent", {
+        hours,
+        order,
+        reminderAt: decision.reminderAt,
+        now,
+      });
     }
   }
-  return sent;
+
+  return { sent, skipped };
 }
 
 /**
- * Existing return-before-end reminders (DELIVERED/ACTIVE).
+ * Return-before-end reminder — exact minute only (no catch-up).
  */
 async function processReturnReminders(now = new Date()) {
   const hoursBefore = env.RETURN_REMINDER_HOURS_BEFORE || 2;
-  const windowStart = new Date(now.getTime() + (hoursBefore * 60 - 5) * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + hoursBefore * 60 * 60 * 1000);
+  // Look ahead so we can claim SKIP for already-passed fire times within horizon
+  const horizon = new Date(now.getTime() + hoursBefore * 60 * 60 * 1000);
 
   const orders = await prisma.order.findMany({
     where: {
       status: { in: ["DELIVERED", "ACTIVE"] },
-      endDatetime: { gte: windowStart, lte: windowEnd },
+      endDatetime: { gt: now, lte: horizon },
     },
     include: { user: true },
   });
 
   let sent = 0;
   for (const order of orders) {
-    const claimed = await claimReminderSlot(order.id, `RETURN_BEFORE_END_${hoursBefore}H`, {});
+    if (!order.user?.telegramId || !order.endDatetime) continue;
+
+    const fireAt = new Date(
+      new Date(order.endDatetime).getTime() - hoursBefore * 60 * 60 * 1000
+    );
+    const decision = decideExactMinuteFire(fireAt, now);
+    if (decision.action === ReminderDecision.WAIT) continue;
+
+    const kind = `RETURN_BEFORE_END_${hoursBefore}H`;
+    const claimed = await claimReminderSlot(order.id, kind, {
+      hoursBefore,
+      status: decision.action,
+      reminderAt: decision.fireAt?.toISOString?.() || null,
+      reason: decision.reason || null,
+      timezone: TZ,
+    });
     if (!claimed) continue;
+
+    if (decision.action === ReminderDecision.SKIP) {
+      logger.info(`Return reminder ${hoursBefore}h skipped`, {
+        context: "ReminderService",
+        orderId: order.id,
+        reason: decision.reason,
+        reminderTime: formatTime(decision.fireAt),
+        currentTime: formatTime(now),
+        timezone: TZ,
+      });
+      continue;
+    }
 
     const { t, resolveLang } = require("../i18n");
     const L = resolveLang(order.user?.language);
@@ -288,6 +377,14 @@ async function processReturnReminders(now = new Date()) {
       text: t("notify.reminder", L, { id: order.id, hours: hoursBefore }),
     });
     sent += 1;
+    logger.info(`Return reminder ${hoursBefore}h sent`, {
+      context: "ReminderService",
+      orderId: order.id,
+      userTelegramId: order.user.telegramId.toString(),
+      reminderTime: formatTime(decision.fireAt),
+      currentTime: formatTime(now),
+      timezone: TZ,
+    });
   }
   return sent;
 }
@@ -295,20 +392,30 @@ async function processReturnReminders(now = new Date()) {
 async function processAllReminders(now = new Date()) {
   const confirmReady = await processConfirmReadyReminders(now);
   const priority = await processPriorityReminders(now);
-  const userStart = await processUserStartReminders(now);
+  const userStartResult = await processUserStartReminders(now);
+  const userStart = userStartResult.sent;
+  const userStartSkipped = userStartResult.skipped;
   const returns = await processReturnReminders(now);
 
   const total = confirmReady + priority + userStart + returns;
-  if (total > 0) {
+  if (total > 0 || userStartSkipped > 0) {
     logger.info("Reminders processed", {
       context: "ReminderService",
       confirmReady,
       priority,
       userStart,
+      userStartSkipped,
       returns,
     });
   }
-  return { confirmReady, priority, userStart, returns, total };
+  return {
+    confirmReady,
+    priority,
+    userStart,
+    userStartSkipped,
+    returns,
+    total,
+  };
 }
 
 async function listUpcomingOrders({ take = 20 } = {}) {
@@ -359,6 +466,7 @@ async function listHighPriorityOrders({ take = 20 } = {}) {
 
 module.exports = {
   ReminderKind,
+  ReminderDecision,
   wasReminderSent,
   claimReminderSlot,
   processAllReminders,
@@ -370,4 +478,5 @@ module.exports = {
   listReadyForConfirmation,
   listHighPriorityOrders,
   buildUserStartReminderText,
+  decideUserStartReminder,
 };

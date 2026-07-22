@@ -72,6 +72,16 @@ function formatDate(date) {
   return `${pad(p.day)}.${pad(p.month)}.${p.year}`;
 }
 
+/** HH:mm in Asia/Tashkent */
+function formatTime(date) {
+  if (date == null || date === "") return "—";
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "—";
+  const p = zonedParts(d);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(p.hour)}:${pad(p.minute)}`;
+}
+
 function startOfDay(date = new Date()) {
   const p = zonedParts(date);
   return zonedDateTime(p.year, p.month, p.day, 0, 0, 0);
@@ -113,6 +123,7 @@ module.exports = {
   formatRemainingDuration,
   formatDatetime,
   formatDate,
+  formatTime,
   quickDateOptions,
   startOfDay,
   endOfDay,

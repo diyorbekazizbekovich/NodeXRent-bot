@@ -344,12 +344,12 @@ async function startAdminInspection(orderId, { adminContext = {}, note = null } 
 
   const unit = order.inventoryUnit;
   if (unit?.status === AssetStatus.INSPECTION) {
-    return order;
+    return order; // already moved at courier return
   }
-  if (unit?.status !== AssetStatus.RENTED) {
+  if (unit?.status !== AssetStatus.RENTED && unit?.status !== AssetStatus.INSPECTION) {
     throw new RentalReturnError(
       "INVALID_UNIT_STATUS",
-      `Unit holati RENTED bo'lishi kerak: hozir ${unit?.status}`
+      `Unit holati RENTED/INSPECTION bo'lishi kerak: hozir ${unit?.status}`
     );
   }
 

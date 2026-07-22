@@ -48,10 +48,20 @@ async function getPhotoSessionForCourier(courierId) {
 /**
  * Start new session, or resume existing IN_PROGRESS (never wipe selections).
  * Pass { forceReset: true } only when courier explicitly restarts.
+ * @param {{ orderId, courierId, inventoryUnitId?, forceReset?, startStep? }}
  */
-async function startOrResume({ orderId, courierId, inventoryUnitId, forceReset = false }) {
+async function startOrResume({
+  orderId,
+  courierId,
+  inventoryUnitId,
+  forceReset = false,
+  startStep = null,
+}) {
   const oid = Number(orderId);
   const existing = await getByOrderId(oid);
+  const initialStep =
+    startStep ||
+    (inventoryUnitId != null ? DeliveryStep.JOYSTICKS : DeliveryStep.UNIT_SELECT);
 
   if (existing?.status === DeliverySessionStatus.COMPLETED) {
     throw new DeliverySessionError(
@@ -65,7 +75,6 @@ async function startOrResume({ orderId, courierId, inventoryUnitId, forceReset =
     Number(existing.courierId) === Number(courierId) &&
     !forceReset
   ) {
-    // Keep selections; refresh inventoryUnitId if missing
     if (!existing.inventoryUnitId && inventoryUnitId != null) {
       return patch(oid, { inventoryUnitId: Number(inventoryUnitId) });
     }
@@ -84,7 +93,7 @@ async function startOrResume({ orderId, courierId, inventoryUnitId, forceReset =
       documentType: null,
       paymentMethod: null,
       consoleItemId: null,
-      currentStep: DeliveryStep.JOYSTICKS,
+      currentStep: initialStep,
       status: DeliverySessionStatus.IN_PROGRESS,
     },
     update: {
@@ -96,7 +105,7 @@ async function startOrResume({ orderId, courierId, inventoryUnitId, forceReset =
       documentType: null,
       paymentMethod: null,
       consoleItemId: null,
-      currentStep: DeliveryStep.JOYSTICKS,
+      currentStep: initialStep,
       status: DeliverySessionStatus.IN_PROGRESS,
     },
   });
